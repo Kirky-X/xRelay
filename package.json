@@ -5,7 +5,7 @@
   "main": "api/index.ts",
   "type": "module",
   "scripts": {
-    "dev": "vercel dev",
+    "dev": "echo 'Edge Function - use Vercel for local testing'",
     "build": "echo 'No build step required for Edge Functions'",
     "deploy": "vercel --prod",
     "test": "vitest run",

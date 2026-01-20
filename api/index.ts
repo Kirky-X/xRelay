@@ -10,6 +10,10 @@
 
 import { SECURITY_CONFIG } from "./config";
 import { validateUrl, isValidPublicIp } from "./security";
+import { checkGlobalRateLimit, checkIpRateLimit } from "./rate-limiter";
+import { getCachedResponse, cacheResponse } from "./cache";
+import { sendRequestWithMultipleProxies } from "./request-handler";
+import type { ProxyRequest } from "./request-handler";
 
 // 类型定义
 interface RequestBody {
@@ -42,7 +46,6 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   // 2. 检查限流（全局）
-  const { checkGlobalRateLimit } = await import("./rate-limiter");
   const globalLimit = checkGlobalRateLimit();
   if (!globalLimit.allowed) {
     if (SECURITY_CONFIG.enableVerboseLogging) {
@@ -60,7 +63,6 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   // 3. 检查限流（IP 级别）
-  const { checkIpRateLimit } = await import("./rate-limiter");
   const ipLimit = checkIpRateLimit(clientIp);
   if (!ipLimit.allowed) {
     if (SECURITY_CONFIG.enableVerboseLogging) {
@@ -77,7 +79,41 @@ export default async function handler(request: Request): Promise<Response> {
     );
   }
 
-  // 4. 解析请求体
+  // 4. 处理 OPTIONS 请求（CORS 预检）
+  if (request.method === "OPTIONS") {
+    const origin = request.headers.get("origin");
+    const allowedOrigins = [
+      "https://vercel-proxy-shield.vercel.app",
+      "http://localhost:3000",
+      "http://localhost:5173",
+    ];
+    const corsOrigin = allowedOrigins.includes(origin || "") ? origin || "" : "";
+
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": corsOrigin,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
+  }
+
+  // 5. 只允许 POST 请求
+  if (request.method !== "POST") {
+    return createJsonResponse(
+      405,
+      {
+        error: "Method not allowed",
+        code: "METHOD_NOT_ALLOWED",
+        allowedMethods: ["POST"],
+      },
+      request,
+    );
+  }
+
+  // 6. 解析请求体
   let body: RequestBody;
   try {
     body = await request.json();
@@ -98,7 +134,10 @@ export default async function handler(request: Request): Promise<Response> {
         request,
       );
     }
-  } catch {
+  } catch (error) {
+    if (SECURITY_CONFIG.enableVerboseLogging) {
+      console.log(`[Main] 解析请求体失败: ${error}`);
+    }
     return createJsonResponse(
       400,
       {
@@ -109,148 +148,104 @@ export default async function handler(request: Request): Promise<Response> {
     );
   }
 
-  // 5. 验证请求
+  // 7. 验证必需字段
   if (!body.url) {
     return createJsonResponse(
       400,
       {
-        error: "Missing required field: url",
+        error: "URL is required",
         code: "MISSING_URL",
       },
       request,
     );
   }
 
-  // 验证 URL 格式
-  try {
-    new URL(body.url);
-  } catch {
-    return createJsonResponse(
-      400,
-      {
-        error: "Invalid URL format",
-        code: "INVALID_URL",
-      },
-      request,
-    );
-  }
-
-  // 验证 URL 安全性（防止 SSRF）
+  // 8. 验证 URL
   const urlValidation = validateUrl(body.url);
   if (!urlValidation.valid) {
     if (SECURITY_CONFIG.enableVerboseLogging) {
-      console.log(`[Main] URL 安全检查失败: ${urlValidation.error}`);
+      console.log(`[Main] URL验证失败: ${urlValidation.error}`);
     }
     return createJsonResponse(
-      403,
+      400,
       {
-        error: "URL not allowed for security reasons",
-        code: "URL_NOT_ALLOWED",
+        error: "Invalid URL",
+        code: "INVALID_URL",
         reason: urlValidation.error,
       },
       request,
     );
   }
 
-  // 6. 检查缓存（如果启用）
-  if (CONFIG.enableCache && body.useCache !== false) {
-    const { getCachedResponse } = await import("./cache");
-    const cachedResponse = getCachedResponse(body.url, body.method || "GET");
-    if (cachedResponse) {
+  // 9. 检查缓存
+  let useCache = body.useCache !== false; // 默认启用缓存
+  if (useCache) {
+    const cached = getCachedResponse(body.url, body.method || "GET");
+    if (cached) {
       if (SECURITY_CONFIG.enableVerboseLogging) {
-        console.log(`[Main] 返回缓存结果`);
+        console.log(`[Main] 返回缓存响应`);
       }
-      return createJsonResponse(
-        200,
-        {
-          ...cachedResponse,
-          cached: true,
-          responseTime: Date.now() - startTime,
-        },
-        request,
-      );
+      return createJsonResponse(200, cached, request);
     }
   }
 
-  // 7. 发送代理请求
-  const { sendProxyRequest } = await import("./request-handler");
-  if (SECURITY_CONFIG.enableVerboseLogging) {
-    console.log(
-      `[Main] 发送代理请求: ${body.method || "GET"} ${new URL(body.url).hostname}`,
-    );
-  }
-  const result = await sendProxyRequest(
-    {
+  // 10. 处理代理请求
+  try {
+    const proxyRequest: ProxyRequest = {
       url: body.url,
       method: body.method || "GET",
       headers: body.headers || {},
       body: body.body,
-    },
-    {
-      maxProxyAttempts: CONFIG.maxProxyAttempts,
-      useFallback: CONFIG.useFallback,
-    },
-  );
+    };
 
-  // 8. 缓存成功响应
-  if (CONFIG.enableCache && body.useCache !== false && result.success) {
-    const { cacheResponse } = await import("./cache");
-    cacheResponse(body.url, body.method || "GET", result);
-  }
+    const response = await sendRequestWithMultipleProxies(proxyRequest, CONFIG.maxProxyAttempts);
 
-  // 9. 返回结果
-  const statusCode = result.success ? 200 : 502;
+    // 缓存成功的响应
+    if (response.success && useCache) {
+      cacheResponse(body.url, body.method || "GET", response);
+    }
 
-  return createJsonResponse(
-    statusCode,
-    {
-      success: result.success,
-      data: result.data,
-      status: result.status,
-      usedProxy: result.usedProxy,
-      fallbackUsed: result.fallbackUsed,
-      error: result.error,
-      responseTime: Date.now() - startTime,
-      rateLimit: {
-        global: globalLimit,
-        ip: ipLimit,
+    const duration = Date.now() - startTime;
+    if (SECURITY_CONFIG.enableVerboseLogging) {
+      console.log(`[Main] 请求完成，耗时: ${duration}ms`);
+    }
+
+    return createJsonResponse(200, response, request);
+  } catch (error) {
+    if (SECURITY_CONFIG.enableVerboseLogging) {
+      console.log(`[Main] 处理请求失败: ${error}`);
+    }
+    return createJsonResponse(
+      500,
+      {
+        error: "Internal server error",
+        code: "INTERNAL_ERROR",
       },
-    },
-    request,
-  );
+      request,
+    );
+  }
 }
 
 /**
- * 获取客户端 IP（改进版，更可靠）
+ * 获取客户端 IP
  */
 function getClientIp(request: Request): string {
-  // Vercel Edge 提供的可靠 IP
-  const cfConnectingIp = request.headers.get("cf-connecting-ip");
-  const vercelIp = request.headers.get("x-vercel-forwarded-for");
-
-  // 优先使用 Cloudflare 或 Vercel 提供的真实 IP
-  if (cfConnectingIp) {
-    return cfConnectingIp;
+  // 优先使用 cf-connecting-ip（Cloudflare）
+  const cfIp = request.headers.get("cf-connecting-ip");
+  if (cfIp && isValidPublicIp(cfIp)) {
+    return cfIp;
   }
 
-  if (vercelIp) {
-    return vercelIp;
-  }
-
-  // 备用方案：x-forwarded-for（但需要验证）
+  // 其次使用 x-forwarded-for
   const forwardedFor = request.headers.get("x-forwarded-for");
   if (forwardedFor) {
-    // x-forwarded-for 可能包含多个 IP，格式为：client, proxy1, proxy2
-    // 取第一个（客户端 IP）
     const clientIp = forwardedFor.split(",")[0].trim();
-
-    // 验证是否为有效的公网 IP
     if (isValidPublicIp(clientIp)) {
       return clientIp;
     }
   }
 
-  // 最后的备用方案
+  // 最后使用 x-real-ip
   const realIp = request.headers.get("x-real-ip");
   if (realIp && isValidPublicIp(realIp)) {
     return realIp;
