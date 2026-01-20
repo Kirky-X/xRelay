@@ -78,14 +78,8 @@ export async function initProxyManager(): Promise<void> {
     try {
       console.log("[ProxyManager] 初始化代理管理器...");
 
-      // 尝试初始化数据库（带超时）
-      const dbInitialized = await Promise.race([
-        initDatabase(),
-        new Promise<boolean>((_, reject) =>
-          setTimeout(() => reject(new Error("Database initialization timeout")), 10000)
-        )
-      ]) as unknown as boolean;
-
+      // 尝试初始化数据库
+      const dbInitialized = await initDatabase();
       isDatabaseMode = dbInitialized;
 
       if (isDatabaseMode) {

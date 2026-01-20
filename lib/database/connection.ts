@@ -20,6 +20,13 @@ let isDatabaseEnabled = false;
  * 初始化数据库连接
  */
 export async function initDatabase(): Promise<boolean> {
+  // Vercel Edge Function 不支持数据库连接池，直接返回 false
+  if (isVercelEnvironment()) {
+    console.log("[Database] Vercel Edge Function detected, using memory mode");
+    isDatabaseEnabled = false;
+    return false;
+  }
+
   const databaseUrl = process.env.DATABASE_URL;
 
   if (!databaseUrl) {
@@ -55,6 +62,17 @@ export async function initDatabase(): Promise<boolean> {
     pool = null;
     return false;
   }
+}
+
+/**
+ * 检测是否在 Vercel 环境中运行
+ */
+function isVercelEnvironment(): boolean {
+  return (
+    process.env.VERCEL === "1" ||
+    process.env.VERCEL_ENV !== undefined ||
+    process.env.AWS_LAMBDA_FUNCTION_VERSION !== undefined
+  );
 }
 
 /**
