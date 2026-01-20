@@ -8,8 +8,8 @@
  * 快速检测代理是否可用，筛选出可用的代理
  */
 
-import type { ProxyInfo } from "./proxy-fetcher";
-import { PROXY_TEST_CONFIG } from "./config";
+import type { ProxyInfo } from "./proxy-fetcher.js";
+import { PROXY_TEST_CONFIG } from "./config.js";
 
 // 代理黑名单（失败的代理）
 const failedProxyBlacklist = new Map<string, number>();

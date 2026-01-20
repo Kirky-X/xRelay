@@ -8,8 +8,8 @@
  * 对相同 URL 的请求进行缓存，减少重复请求
  */
 
-import type { ProxyResponse } from "./request-handler";
-import { CACHE_CONFIG } from "./config";
+import type { ProxyResponse } from "./request-handler.js";
+import { CACHE_CONFIG } from "./config.js";
 
 // 缓存条目
 interface CacheEntry {

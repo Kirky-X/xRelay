@@ -8,13 +8,13 @@
  * 管理代理的生命周期、轮换、失效检测
  */
 
-import { fetchAllProxies, type ProxyInfo } from "./proxy-fetcher";
+import { fetchAllProxies, type ProxyInfo } from "./proxy-fetcher.js";
 import {
   quickTestProxies,
   cleanupBlacklist,
   getBlacklistStatus,
-} from "./proxy-tester";
-import { PROXY_CONFIG } from "./config";
+} from "./proxy-tester.js";
+import { PROXY_CONFIG } from "./config.js";
 
 // 代理池状态
 interface ProxyPoolState {

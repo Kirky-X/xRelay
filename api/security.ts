@@ -8,7 +8,7 @@
  * 提供 URL 验证、IP 验证等安全功能
  */
 
-import { SECURITY_CONFIG } from "./config";
+import { SECURITY_CONFIG } from "./config.js";
 
 /**
  * 验证 URL 是否安全（防止 SSRF）

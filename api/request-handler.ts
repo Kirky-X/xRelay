@@ -8,14 +8,14 @@
  * 核心功能：代理请求 → 失败切换 → Fallback 直连
  */
 
-import type { ProxyInfo } from "./proxy-fetcher";
+import type { ProxyInfo } from "./proxy-fetcher.js";
 import {
   getAvailableProxy,
   getMultipleProxies,
   reportProxyFailed,
   reportProxySuccess,
-} from "./proxy-manager";
-import { REQUEST_TIMEOUT_CONFIG } from "./config";
+} from "./proxy-manager.js";
+import { REQUEST_TIMEOUT_CONFIG } from "./config.js";
 
 // 请求类型定义
 export interface ProxyRequest {

@@ -8,12 +8,12 @@
  * 处理所有代理请求
  */
 
-import { SECURITY_CONFIG, API_KEY_CONFIG } from "./config";
-import { validateUrl, isValidPublicIp } from "./security";
-import { checkGlobalRateLimit, checkIpRateLimit } from "./rate-limiter";
-import { getCachedResponse, cacheResponse } from "./cache";
-import { sendRequestWithMultipleProxies } from "./request-handler";
-import type { ProxyRequest } from "./request-handler";
+import { SECURITY_CONFIG, API_KEY_CONFIG } from "./config.js";
+import { validateUrl, isValidPublicIp } from "./security.js";
+import { checkGlobalRateLimit, checkIpRateLimit } from "./rate-limiter.js";
+import { getCachedResponse, cacheResponse } from "./cache.js";
+import { sendRequestWithMultipleProxies } from "./request-handler.js";
+import type { ProxyRequest } from "./request-handler.js";
 
 // 类型定义
 interface RequestBody {

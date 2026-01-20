@@ -8,7 +8,7 @@
  * 从多个免费代理源获取代理 IP
  */
 
-import { PROXY_CONFIG } from "./config";
+import { PROXY_CONFIG } from "./config.js";
 
 // 代理源配置
 const PROXY_SOURCES = [

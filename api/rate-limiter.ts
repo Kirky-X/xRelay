@@ -8,7 +8,7 @@
  * 防止滥用，保护服务稳定性
  */
 
-import { RATE_LIMIT_CONFIG } from "./config";
+import { RATE_LIMIT_CONFIG } from "./config.js";
 
 // 限流记录
 interface RateLimitRecord {
