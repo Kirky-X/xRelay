@@ -285,8 +285,8 @@ header {
 }
 
 .code-card:hover {
-  border-color: rgba(255, 107, 157, 0.3);
-  box-shadow: 0 12px 48px rgba(255, 107, 157, 0.2),
+  border-color: rgba(255, 250, 240, 0.3);
+  box-shadow: 0 12px 48px rgba(255, 250, 240, 0.2),
               0 0 0 1px rgba(255, 255, 255, 0.1);
   transform: translateY(-4px);
 }
@@ -369,7 +369,7 @@ header {
 .repo-link:hover {
   border-color: transparent;
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(255, 107, 157, 0.3);
+  box-shadow: 0 8px 24px rgba(255, 250, 240, 0.3);
 }
 
 .repo-link:hover::before {
@@ -403,8 +403,8 @@ header {
 }
 
 .repo-link-small:hover {
-  border-color: rgba(255, 107, 157, 0.5);
-  background: rgba(255, 107, 157, 0.1);
+  border-color: rgba(255, 250, 240, 0.5);
+  background: rgba(255, 250, 240, 0.1);
   transform: translateY(-2px);
 }
 
@@ -439,7 +439,7 @@ header {
 }
 
 .feature-card:hover {
-  border-color: rgba(255, 107, 157, 0.3);
+  border-color: rgba(255, 250, 240, 0.3);
   transform: translateY(-4px);
 }
 
