@@ -68,7 +68,7 @@ async function sendRequestWithProxy(
 
     // 构建 undici 请求选项
     const undiciOptions = {
-      method: request.method,
+      method: request.method as any,
       headers: request.headers as any,
       dispatcher,
       signal: controller.signal as any,
@@ -78,12 +78,23 @@ async function sendRequestWithProxy(
     const response = await undiciRequest(request.url, undiciOptions);
     clearTimeout(timeoutId);
 
-    const text = await response.body.text();
+    // 使用 ReadableStream 读取响应体
+    let text = '';
+    if (response.body) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of response.body as any) {
+        chunks.push(chunk);
+      }
+      text = Buffer.concat(chunks).toString('utf-8');
+    }
 
     const headers: Record<string, string> = {};
-    response.headers.forEach((value, key) => {
-      headers[key] = value;
-    });
+    const responseHeaders = response.headers as any;
+    if (responseHeaders && typeof responseHeaders.forEach === 'function') {
+      responseHeaders.forEach((value: string, key: string) => {
+        headers[key] = value;
+      });
+    }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return {
