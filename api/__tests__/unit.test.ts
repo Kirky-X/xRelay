@@ -38,6 +38,10 @@ describe('Cache', () => {
       data: '{"test": "data"}',
       status: 200,
       headers: {},
+      proxyUsed: true,
+      proxyIp: '1.2.3.4:8080',
+      proxySuccess: true,
+      fallbackUsed: false,
     };
 
     await cacheResponse('https://example.com/test', 'GET', testResponse);
@@ -54,8 +58,8 @@ describe('Cache', () => {
       return;
     }
 
-    await cacheResponse('https://example.com/1', 'GET', { success: true, data: '', status: 200, headers: {} });
-    await cacheResponse('https://example.com/2', 'GET', { success: true, data: '', status: 200, headers: {} });
+    await cacheResponse('https://example.com/1', 'GET', { success: true, data: '', status: 200, headers: {}, proxyUsed: true, proxyIp: '1.2.3.4:8080', proxySuccess: true, fallbackUsed: false });
+    await cacheResponse('https://example.com/2', 'GET', { success: true, data: '', status: 200, headers: {}, proxyUsed: true, proxyIp: '1.2.3.4:8080', proxySuccess: true, fallbackUsed: false });
 
     await clearCache();
 
@@ -73,7 +77,7 @@ describe('Cache', () => {
       return;
     }
 
-    await cacheResponse('https://example.com/1', 'GET', { success: true, data: '', status: 200, headers: {} });
+    await cacheResponse('https://example.com/1', 'GET', { success: true, data: '', status: 200, headers: {}, proxyUsed: true, proxyIp: '1.2.3.4:8080', proxySuccess: true, fallbackUsed: false });
 
     await invalidateCache('https://example.com/1', 'GET');
 
@@ -94,6 +98,10 @@ describe('Cache', () => {
     const failedResponse = {
       success: false,
       error: 'Test error',
+      proxyUsed: false,
+      proxyIp: null,
+      proxySuccess: false,
+      fallbackUsed: false,
     };
 
     await cacheResponse('https://example.com/failed', 'GET', failedResponse);
@@ -109,6 +117,10 @@ describe('Cache', () => {
       data: '{"test": "data"}',
       status: 200,
       headers: {},
+      proxyUsed: true,
+      proxyIp: '1.2.3.4:8080',
+      proxySuccess: true,
+      fallbackUsed: false,
     };
 
     await cacheResponse('https://example.com/expired', 'GET', testResponse);

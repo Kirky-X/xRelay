@@ -30,9 +30,12 @@ export interface ProxyResponse {
   data?: string;
   status?: number;
   headers?: Record<string, string>;
-  usedProxy?: string;
+  // 代理相关信息
+  proxyUsed: boolean;
+  proxyIp: string | null;
+  proxySuccess: boolean;
+  fallbackUsed: boolean;
   error?: string;
-  fallbackUsed?: boolean;
 }
 
 /**
@@ -202,7 +205,10 @@ export async function sendProxyRequest(
         data: result.data,
         status: result.status,
         headers: result.headers,
-        usedProxy: `${proxy.ip}:${proxy.port}`,
+        proxyUsed: true,
+        proxyIp: `${proxy.ip}:${proxy.port}`,
+        proxySuccess: true,
+        fallbackUsed: false,
       };
     } else {
       console.log(`[RequestHandler] 代理请求失败`);
@@ -224,6 +230,9 @@ export async function sendProxyRequest(
         data: result.data,
         status: result.status,
         headers: result.headers,
+        proxyUsed: false,
+        proxyIp: null,
+        proxySuccess: false,
         fallbackUsed: true,
       };
     } else {
@@ -232,6 +241,10 @@ export async function sendProxyRequest(
       return {
         success: false,
         error: `代理失败，直连也失败`,
+        proxyUsed: false,
+        proxyIp: null,
+        proxySuccess: false,
+        fallbackUsed: true,
       };
     }
   }
@@ -240,6 +253,10 @@ export async function sendProxyRequest(
   return {
     success: false,
     error: "所有代理尝试失败",
+    proxyUsed: false,
+    proxyIp: null,
+    proxySuccess: false,
+    fallbackUsed: false,
   };
 }
 
@@ -256,13 +273,18 @@ export async function sendRequestWithMultipleProxies(
 
   if (proxies.length === 0) {
     // 没有代理，直接直连
-    return sendRequestDirect(request).then((result) => ({
+    const result = await sendRequestDirect(request);
+    return {
       success: result.success,
       data: result.data,
       status: result.status,
       headers: result.headers,
+      proxyUsed: false,
+      proxyIp: null,
+      proxySuccess: false,
       fallbackUsed: true,
-    }));
+      error: result.success ? undefined : result.error,
+    };
   }
 
   // 并行发送请求
@@ -282,7 +304,10 @@ export async function sendRequestWithMultipleProxies(
         data: result.data,
         status: result.status,
         headers: result.headers,
-        usedProxy: `${proxy.ip}:${proxy.port}`,
+        proxyUsed: true,
+        proxyIp: `${proxy.ip}:${proxy.port}`,
+        proxySuccess: true,
+        fallbackUsed: false,
       };
     } else {
       reportProxyFailed(proxy);
@@ -298,7 +323,10 @@ export async function sendRequestWithMultipleProxies(
     data: fallbackResult.data,
     status: fallbackResult.status,
     headers: fallbackResult.headers,
-    error: fallbackResult.success ? undefined : fallbackResult.error,
+    proxyUsed: false,
+    proxyIp: null,
+    proxySuccess: false,
     fallbackUsed: true,
+    error: fallbackResult.success ? undefined : fallbackResult.error,
   };
 }
