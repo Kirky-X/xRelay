@@ -441,8 +441,6 @@ header {
 .feature-icon {
   width: 64px;
   height: 64px;
-  background: var(--primary-gradient);
-  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
