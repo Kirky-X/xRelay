@@ -25,6 +25,52 @@ const PROXY_SOURCES = [
     },
   },
   {
+    name: "GitHub-clarketm",
+    url: "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+    parse: (text: string) => {
+      return text
+        .trim()
+        .split("\n")
+        .filter((line) => line.includes(":"))
+        .map((line) => line.trim());
+    },
+  },
+  {
+    name: "GitHub-ShiftyTR",
+    url: "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/proxy.txt",
+    parse: (text: string) => {
+      return text
+        .trim()
+        .split("\n")
+        .filter((line) => line.includes(":"))
+        .map((line) => line.trim());
+    },
+  },
+  {
+    name: "GitHub-fate0",
+    url: "https://raw.githubusercontent.com/fate0/proxylist/master/proxy.list",
+    parse: (text: string) => {
+      // JSON 格式: {"host": "ip", "port": 80, "type": "http"}
+      try {
+        const lines = text.trim().split("\n");
+        const proxies: string[] = [];
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line);
+            if (data.host && data.port && (data.type === "http" || data.type === "https")) {
+              proxies.push(`${data.host}:${data.port}`);
+            }
+          } catch {
+            // 忽略无效的 JSON 行
+          }
+        }
+        return proxies;
+      } catch {
+        return [];
+      }
+    },
+  },
+  {
     name: "FreeProxyList",
     url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/main/http.txt",
     parse: (text: string) => {
