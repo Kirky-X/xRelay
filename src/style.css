@@ -11,7 +11,7 @@
   --text-primary: #ffffff;
   --text-secondary: rgba(255, 255, 255, 0.6);
   --border-color: rgba(255, 255, 255, 0.1);
-  --glow-color: rgba(255, 107, 157, 0.5);
+  --glow-color: rgba(255, 255, 255, 0.5);
 }
 
 body {
