@@ -247,7 +247,7 @@ header {
 .code-section {
   width: 100%;
   max-width: 800px;
-  margin-bottom: 4rem;
+  margin: 0 auto 4rem auto;
 }
 
 .code-card {
