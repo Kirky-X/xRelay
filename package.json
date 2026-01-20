@@ -1,0 +1,23 @@
+{
+  "name": "vercel-proxy-shield",
+  "version": "1.0.0",
+  "description": "Vercel Edge Function proxy with free proxy pool and fallback",
+  "main": "api/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "vercel build",
+    "deploy": "vercel --prod",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@vercel/edge": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "vercel": "^33.0.0",
+    "vitest": "^1.6.1"
+  }
+}

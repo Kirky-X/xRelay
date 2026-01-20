@@ -1,0 +1,10 @@
+{
+  "framework": "vercel",
+  "regions": ["iad1", "sfo1", "sin1", "hnd1", "cdg1"],
+  "functions": {
+    "api/**/*.ts": {
+      "runtime": "edge",
+      "maxDuration": 30
+    }
+  }
+}
