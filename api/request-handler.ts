@@ -54,11 +54,11 @@ async function sendRequestWithProxy(
   console.log(`[RequestHandler] 使用代理: ${proxy.ip}:***`);
 
   try {
-    // 使用 undici 的 ProxyAgent 实现真正的代理
-    const { ProxyAgent, setGlobalDispatcher, request: undiciRequest } = await import('undici');
+    // 使用 undici 的 request 方法直接发送请求
+    const { request: undiciRequest, ProxyAgent } = await import('undici');
     
-    const proxyAgent = new ProxyAgent(`http://${proxy.ip}:${proxy.port}`);
-    setGlobalDispatcher(proxyAgent);
+    const proxyUrl = `http://${proxy.ip}:${proxy.port}`;
+    const dispatcher = new ProxyAgent(proxyUrl);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(
@@ -66,41 +66,36 @@ async function sendRequestWithProxy(
       REQUEST_TIMEOUT_CONFIG.proxy,
     );
 
-    // 构建请求
-    const fetchOptions: RequestInit = {
+    // 构建 undici 请求选项
+    const undiciOptions = {
       method: request.method,
-      headers: request.headers || {},
-      signal: controller.signal,
+      headers: request.headers as any,
+      dispatcher,
+      signal: controller.signal as any,
+      body: request.body,
     };
 
-    if (request.body && ["POST", "PUT", "PATCH"].includes(request.method)) {
-      fetchOptions.body = request.body;
-    }
-
-    const response = await fetch(request.url, fetchOptions);
+    const response = await undiciRequest(request.url, undiciOptions);
     clearTimeout(timeoutId);
 
-    // 重置全局 dispatcher
-    setGlobalDispatcher(null as any);
+    const text = await response.body.text();
 
     const headers: Record<string, string> = {};
     response.headers.forEach((value, key) => {
       headers[key] = value;
     });
 
-    const text = await response.text();
-
-    if (response.ok) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
       return {
         success: true,
         data: text,
-        status: response.status,
+        status: response.statusCode,
         headers,
       };
     } else {
       return {
         success: false,
-        error: `HTTP ${response.status}`,
+        error: `HTTP ${response.statusCode}`,
         data: text,
       };
     }
@@ -108,6 +103,7 @@ async function sendRequestWithProxy(
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
     console.log(`[RequestHandler] 代理请求失败: ${errorMessage}`);
+    
     return {
       success: false,
       error: errorMessage,
