@@ -33,14 +33,25 @@
 
         <!-- 代码示例 -->
         <div class="code-section">
-          <div class="code-card">
-            <div class="code-header">
-              <div class="code-dot red"></div>
-              <div class="code-dot yellow"></div>
-              <div class="code-dot green"></div>
-              <span class="code-title">request-example.sh</span>
+          <div class="code-cards">
+            <div class="code-card">
+              <div class="code-header">
+                <div class="code-dot red"></div>
+                <div class="code-dot yellow"></div>
+                <div class="code-dot green"></div>
+                <span class="code-title">basic-request.sh</span>
+              </div>
+              <pre class="code-content" @click="copyCode(0)" title="点击复制代码"><code>{{ codeExample1 }}</code></pre>
             </div>
-            <pre class="code-content" @click="copyCode" title="点击复制代码"><code>{{ codeExample }}</code></pre>
+            <div class="code-card">
+              <div class="code-header">
+                <div class="code-dot red"></div>
+                <div class="code-dot yellow"></div>
+                <div class="code-dot green"></div>
+                <span class="code-title">advanced-request.sh</span>
+              </div>
+              <pre class="code-content" @click="copyCode(1)" title="点击复制代码"><code>{{ codeExample2 }}</code></pre>
+            </div>
           </div>
         </div>
 
@@ -72,16 +83,16 @@ import { ref, onMounted } from 'vue';
 
 const typingText = ref('');
 const fullText = '安全、快速、免费的代理转发服务';
-const codeExample = `# 基本请求示例
+const codeExample1 = `# 基本请求示例
 curl -X POST https://xrelay.vercel.app/api \\
   -H "Content-Type: application/json" \\
   -H "x-api-key: YOUR_API_KEY" \\
   -d '{
     "url": "https://api.example.com/data",
     "method": "GET"
-  }'
+  }'`;
 
-# 带自定义头部的请求
+const codeExample2 = `# 带自定义头部的请求
 curl -X POST https://xrelay.vercel.app/api \\
   -H "Content-Type: application/json" \\
   -H "x-api-key: YOUR_API_KEY" \\
@@ -108,8 +119,9 @@ const typeText = () => {
 };
 
 // 复制代码
-const copyCode = () => {
-  navigator.clipboard.writeText(codeExample).then(() => {
+const copyCode = (index: number) => {
+  const code = index === 0 ? codeExample1 : codeExample2;
+  navigator.clipboard.writeText(code).then(() => {
     alert('代码已复制到剪贴板！');
   });
 };
@@ -243,8 +255,14 @@ header {
 /* 代码块区域 */
 .code-section {
   width: 100%;
-  max-width: 800px;
+  max-width: 1200px;
   margin: 0 auto 4rem auto;
+}
+
+.code-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
 }
 
 .code-card {
@@ -448,6 +466,10 @@ header {
 
   .cursor {
     height: 1.75rem;
+  }
+
+  .code-cards {
+    grid-template-columns: 1fr;
   }
 
   .logo-container img {
