@@ -155,8 +155,8 @@ onMounted(() => {
   left: -50%;
   width: 200%;
   height: 200%;
-  background: radial-gradient(circle at 30% 30%, rgba(124, 58, 237, 0.15) 0%, transparent 50%),
-              radial-gradient(circle at 70% 70%, rgba(0, 212, 255, 0.1) 0%, transparent 50%);
+  background: radial-gradient(circle at 30% 30%, rgba(255, 107, 157, 0.15) 0%, transparent 50%),
+              radial-gradient(circle at 70% 70%, rgba(255, 142, 83, 0.1) 0%, transparent 50%);
   animation: bgRotate 20s linear infinite;
 }
 
@@ -280,8 +280,8 @@ header {
 }
 
 .code-card:hover {
-  border-color: rgba(124, 58, 237, 0.3);
-  box-shadow: 0 12px 48px rgba(124, 58, 237, 0.2),
+  border-color: rgba(255, 107, 157, 0.3);
+  box-shadow: 0 12px 48px rgba(255, 107, 157, 0.2),
               0 0 0 1px rgba(255, 255, 255, 0.1);
   transform: translateY(-4px);
 }
@@ -364,7 +364,7 @@ header {
 .repo-link:hover {
   border-color: transparent;
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.3);
+  box-shadow: 0 8px 24px rgba(255, 107, 157, 0.3);
 }
 
 .repo-link:hover::before {
@@ -398,8 +398,8 @@ header {
 }
 
 .repo-link-small:hover {
-  border-color: rgba(124, 58, 237, 0.5);
-  background: rgba(124, 58, 237, 0.1);
+  border-color: rgba(255, 107, 157, 0.5);
+  background: rgba(255, 107, 157, 0.1);
   transform: translateY(-2px);
 }
 
@@ -434,7 +434,7 @@ header {
 }
 
 .feature-card:hover {
-  border-color: rgba(124, 58, 237, 0.3);
+  border-color: rgba(255, 107, 157, 0.3);
   transform: translateY(-4px);
 }
 
