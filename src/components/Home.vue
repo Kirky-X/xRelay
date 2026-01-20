@@ -228,10 +228,7 @@ header {
 .typing-text {
   font-size: 2.5rem;
   font-weight: 700;
-  background: var(--primary-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #e0e0e0;
   display: inline;
 }
 
@@ -239,7 +236,7 @@ header {
   display: inline-block;
   width: 3px;
   height: 2.5rem;
-  background: var(--primary-gradient);
+  background: #e0e0e0;
   margin-left: 0.5rem;
   animation: blink 1s step-end infinite;
   vertical-align: middle;
