@@ -213,12 +213,9 @@ header {
 
 .logo-text {
   margin-top: 1rem;
-  font-size: 2.5rem;
+  font-size: 3.5rem;
   font-weight: 700;
-  background: var(--primary-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #ffffff;
   letter-spacing: 0.1em;
 }
 
