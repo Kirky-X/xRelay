@@ -34,6 +34,18 @@ export const config = {
 };
 
 /**
+ * 获取请求头值（兼容 Headers 对象和普通对象）
+ */
+function getHeaderValue(headers: Headers | Record<string, string>, name: string): string | null {
+  if (headers && typeof headers.get === 'function') {
+    return headers.get(name);
+  } else if (headers && (headers as Record<string, string>)[name]) {
+    return (headers as Record<string, string>)[name];
+  }
+  return null;
+}
+
+/**
  * 验证 API Key
  */
 function validateApiKey(request: Request): boolean {
@@ -48,7 +60,7 @@ function validateApiKey(request: Request): boolean {
   }
 
   // 获取请求中的 API Key
-  const apiKey = request.headers.get(API_KEY_CONFIG.headerName);
+  const apiKey = getHeaderValue(request.headers, API_KEY_CONFIG.headerName);
   
   if (!apiKey) {
     return false;
@@ -121,7 +133,7 @@ export default async function handler(request: Request): Promise<Response> {
 
   // 5. 处理 OPTIONS 请求（CORS 预检）
   if (request.method === "OPTIONS") {
-    const origin = request.headers.get("origin");
+    const origin = getHeaderValue(request.headers, "origin");
     const allowedOrigins = [
       "https://vercel-proxy-shield.vercel.app",
       "http://localhost:3000",
@@ -271,13 +283,13 @@ export default async function handler(request: Request): Promise<Response> {
  */
 function getClientIp(request: Request): string {
   // 优先使用 cf-connecting-ip（Cloudflare）
-  const cfIp = request.headers.get("cf-connecting-ip");
+  const cfIp = getHeaderValue(request.headers, "cf-connecting-ip");
   if (cfIp && isValidPublicIp(cfIp)) {
     return cfIp;
   }
 
   // 其次使用 x-forwarded-for
-  const forwardedFor = request.headers.get("x-forwarded-for");
+  const forwardedFor = getHeaderValue(request.headers, "x-forwarded-for");
   if (forwardedFor) {
     const clientIp = forwardedFor.split(",")[0].trim();
     if (isValidPublicIp(clientIp)) {
@@ -286,7 +298,7 @@ function getClientIp(request: Request): string {
   }
 
   // 最后使用 x-real-ip
-  const realIp = request.headers.get("x-real-ip");
+  const realIp = getHeaderValue(request.headers, "x-real-ip");
   if (realIp && isValidPublicIp(realIp)) {
     return realIp;
   }
@@ -302,7 +314,7 @@ function createJsonResponse(
   data: unknown,
   request?: Request,
 ): Response {
-  const origin = request?.headers.get("origin");
+  const origin = request ? getHeaderValue(request.headers, "origin") : null;
   const allowedOrigins = [
     "https://vercel-proxy-shield.vercel.app",
     "http://localhost:3000",
