@@ -41,6 +41,20 @@ export const PROXY_CONFIG = {
   },
 };
 
+// 数据库配置
+export const DATABASE_CONFIG = {
+  // 最小代理数量，低于此值时自动补充
+  minProxyCount: 5,
+  // 失败阈值，超过此值移入废弃表
+  failureThreshold: 10,
+  // 废弃代理保留天数
+  deprecatedRetentionDays: 30,
+  // 自动清理间隔（毫秒）
+  cleanupInterval: 24 * 60 * 60 * 1000, // 24小时
+  // 每次请求选取的代理数量
+  proxiesPerRequest: 5,
+};
+
 // 限流配置
 export const RATE_LIMIT_CONFIG = {
   global: {

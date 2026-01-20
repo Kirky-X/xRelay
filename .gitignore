@@ -34,3 +34,10 @@ yarn-error.log*
 
 # Tools
 .trae/
+
+#iflow, .trae, openspec
+.iflow/
+.openspec/
+
+# Docker
+docker-compose.override.yml

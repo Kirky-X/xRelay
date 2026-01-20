@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:16-alpine
+    container_name: xrelay-postgres-dev
+    environment:
+      POSTGRES_USER: xrelay
+      POSTGRES_PASSWORD: xrelay_password
+      POSTGRES_DB: xrelay
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xrelay"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - xrelay-network
+
+  # xRelay 应用（开发模式）
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xrelay-app-dev
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://xrelay:xrelay_password@postgres:5432/xrelay
+      ENABLE_API_KEY: "false"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./api:/app/api
+      - ./src:/app/src
+    networks:
+      - xrelay-network
+    restart: unless-stopped
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: xrelay-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - xrelay-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  xrelay-network:
+    driver: bridge

@@ -6,12 +6,17 @@
 /**
  * Proxy Tester - 测试代理可用性
  * 快速检测代理是否可用，筛选出可用的代理
+ * 支持数据库集成
  */
 
 import type { ProxyInfo } from "./proxy-fetcher.js";
-import { PROXY_TEST_CONFIG } from "./config.js";
+import { PROXY_TEST_CONFIG, DATABASE_CONFIG } from "./config.js";
+import { isDatabaseReady } from "./database/connection.js";
+import {
+  insertDeprecatedProxy,
+} from "./database/deprecated-proxies-dao.js";
 
-// 代理黑名单（失败的代理）
+// 代理黑名单（失败的代理，内存模式）
 const failedProxyBlacklist = new Map<string, number>();
 
 /**
@@ -23,15 +28,17 @@ export async function testProxy(proxy: ProxyInfo): Promise<{
   latency?: number;
   error?: string;
 }> {
-  // 检查是否在黑名单中
-  const blacklistKey = `${proxy.ip}:${proxy.port}`;
-  const blacklistExpiry = failedProxyBlacklist.get(blacklistKey);
-  if (blacklistExpiry && Date.now() < blacklistExpiry) {
-    return {
-      success: false,
-      proxy,
-      error: "In blacklist",
-    };
+  // 检查是否在黑名单中（内存模式）
+  if (!isDatabaseReady()) {
+    const blacklistKey = `${proxy.ip}:${proxy.port}`;
+    const blacklistExpiry = failedProxyBlacklist.get(blacklistKey);
+    if (blacklistExpiry && Date.now() < blacklistExpiry) {
+      return {
+        success: false,
+        proxy,
+        error: "In blacklist",
+      };
+    }
   }
 
   const startTime = Date.now();
@@ -203,19 +210,92 @@ export async function quickTestProxies(
 }
 
 /**
+ * 检测代理可达性（使用前检测）
+ */
+export async function checkProxyReachability(proxy: ProxyInfo): Promise<{
+  reachable: boolean;
+  error?: string;
+}> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      PROXY_TEST_CONFIG.quickTestTimeout,
+    );
+
+    const response = await fetch(PROXY_TEST_CONFIG.testUrl, {
+      method: "HEAD",
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      return { reachable: true };
+    } else {
+      return {
+        reachable: false,
+        error: `HTTP ${response.status}`,
+      };
+    }
+  } catch (error) {
+    return {
+      reachable: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+/**
  * 标记代理为失败
  */
 function markProxyAsFailed(proxy: ProxyInfo): void {
   const key = `${proxy.ip}:${proxy.port}`;
-  failedProxyBlacklist.set(
-    key,
-    Date.now() + PROXY_TEST_CONFIG.blacklistDuration,
-  );
+
+  // 如果使用数据库模式，不需要内存黑名单
+  if (!isDatabaseReady()) {
+    failedProxyBlacklist.set(
+      key,
+      Date.now() + PROXY_TEST_CONFIG.blacklistDuration,
+    );
+  }
+
   console.log(`[ProxyTester] 代理失效: ${proxy.ip}:***，加入黑名单`);
 }
 
 /**
- * 清理过期黑名单
+ * 将不可达代理移入废弃表（数据库模式）
+ */
+export async function moveUnreachableProxyToDeprecated(
+  proxy: ProxyInfo,
+  error?: string,
+): Promise<void> {
+  if (!isDatabaseReady()) {
+    // 内存模式，只记录到黑名单
+    markProxyAsFailed(proxy);
+    return;
+  }
+
+  try {
+    console.log(
+      `[ProxyTester] 代理不可达，移入废弃表: ${proxy.ip}:*** (${error || "Unknown error"})`,
+    );
+
+    await insertDeprecatedProxy({
+      ip: proxy.ip,
+      port: parseInt(proxy.port, 10),
+      source: proxy.source,
+      protocol: "http",
+      failure_count: DATABASE_CONFIG.failureThreshold, // 直接设为最大值
+      created_at: new Date(proxy.timestamp),
+    });
+  } catch (err) {
+    console.error("[ProxyTester] 移入废弃表失败:", err);
+  }
+}
+
+/**
+ * 清理过期黑名单（内存模式）
  */
 export function cleanupBlacklist(): void {
   const now = Date.now();

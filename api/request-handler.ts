@@ -281,12 +281,16 @@ export async function sendProxyRequest(
  */
 export async function sendRequestWithMultipleProxies(
   request: ProxyRequest,
-  proxyCount: number = 3,
+  proxyCount?: number,
 ): Promise<ProxyResponse> {
-  console.log(`[RequestHandler] 串行尝试最多 ${proxyCount} 个代理`);
+  // 使用配置的代理数量
+  const { DATABASE_CONFIG } = await import("./config.js");
+  const actualProxyCount = proxyCount || DATABASE_CONFIG.proxiesPerRequest;
 
-  // 获取代理（最多 proxyCount 个，不足则获取所有可用代理）
-  const proxies = await getMultipleProxies(proxyCount);
+  console.log(`[RequestHandler] 串行尝试最多 ${actualProxyCount} 个代理`);
+
+  // 获取代理（最多 actualProxyCount 个，不足则获取所有可用代理）
+  const proxies = await getMultipleProxies(actualProxyCount);
 
   if (proxies.length === 0) {
     console.log(`[RequestHandler] 没有可用代理，直接使用直连`);
@@ -311,6 +315,17 @@ export async function sendRequestWithMultipleProxies(
   for (let i = 0; i < proxies.length; i++) {
     const proxy = proxies[i];
     console.log(`[RequestHandler] 尝试代理 ${i + 1}/${proxies.length}: ${proxy.ip}:${proxy.port}`);
+
+    // 使用前检测可达性
+    const { checkProxyReachability, moveUnreachableProxyToDeprecated } = await import("./proxy-tester.js");
+    const reachabilityCheck = await checkProxyReachability(proxy);
+
+    if (!reachabilityCheck.reachable) {
+      console.log(`[RequestHandler] 代理不可达，跳过: ${reachabilityCheck.error}`);
+      await moveUnreachableProxyToDeprecated(proxy, reachabilityCheck.error);
+      reportProxyFailed(proxy);
+      continue; // 尝试下一个代理
+    }
 
     try {
       const result = await sendRequestWithProxy(request, proxy);

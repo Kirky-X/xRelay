@@ -22,6 +22,9 @@
 - **🚦 请求限流** - 防止滥用，保护资源
 - **💾 响应缓存** - 减少重复请求
 - **🕵️ IP 隐藏** - 隐藏本地 IP，保护隐私
+- **🗄️ 数据库持久化** - 支持 PostgreSQL 存储，跨实例共享代理状态
+- **⚖️ 智能权重选择** - 基于成功率自动选择最优代理
+- **🔄 多代理回退** - 每次请求选 5 个代理依次尝试
 
 ## 使用方法
 
@@ -127,11 +130,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - **全局限流**: 每分钟 10 次
 - **IP 限流**: 每分钟 5 次
 
+### 数据库配置（可选）
+
+支持 PostgreSQL 数据库持久化代理状态，配置后可享受以下优势：
+
+- **跨实例共享**: 多个部署实例共享代理状态
+- **智能权重**: 基于历史成功率自动选择最优代理
+- **自动清理**: 废弃代理 30 天后自动删除
+- **状态持久化**: 服务重启后快速恢复代理状态
+
+配置方法：
+
+1. 在 Vercel 环境变量中添加 `DATABASE_URL`
+2. 格式：`postgresql://user:password@host:port/database`
+3. 推荐使用 [Neon PostgreSQL](https://neon.tech/)（免费额度充足）
+
+示例：
+
+```bash
+# Neon PostgreSQL
+DATABASE_URL=postgresql://user:password@ep-xxx.region.aws.neon.tech/neondb?sslmode=require
+
+# 本地 PostgreSQL
+DATABASE_URL=postgresql://postgres:password@localhost:5432/xrelay
+```
+
+**注意**: 如果不配置 `DATABASE_URL`，系统将使用内存模式，功能完全正常。
+
 ## 项目结构
 
 ```
 vercel-proxy-shield/
 ├── api/
+│   ├── database/         # 数据库模块
+│   │   ├── connection.ts        # 数据库连接管理
+│   │   ├── available-proxies-dao.ts  # 可用代理 DAO
+│   │   ├── deprecated-proxies-dao.ts # 废弃代理 DAO
+│   │   ├── cleanup.ts            # 自动清理任务
+│   │   └── schema.sql            # 数据库 Schema
 │   ├── index.ts          # Edge Function 入口
 │   ├── proxy-fetcher.ts  # 代理获取
 │   ├── proxy-tester.ts   # 代理测试

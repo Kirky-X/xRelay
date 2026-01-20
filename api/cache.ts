@@ -15,6 +15,7 @@ import { CACHE_CONFIG } from "./config.js";
 interface CacheEntry {
   response: ProxyResponse;
   timestamp: number;
+  expiredAt: number; // 废弃时间戳
 }
 
 /**
@@ -63,8 +64,16 @@ export async function getCachedResponse(
       return null;
     }
 
-    // 检查是否过期
     const now = Date.now();
+
+    // 检查是否已废弃
+    if (now > value.expiredAt) {
+      console.log(`[Cache] 缓存已废弃，删除: ${key}`);
+      await kv.del(key);
+      return null;
+    }
+
+    // 检查是否过期（TTL）
     if (now - value.timestamp > CACHE_CONFIG.ttl) {
       console.log(`[Cache] 缓存过期，删除: ${key}`);
       await kv.del(key);
@@ -100,14 +109,16 @@ export async function cacheResponse(
     }
 
     const key = generateCacheKey(url, method);
+    const now = Date.now();
     const entry: CacheEntry = {
       response,
-      timestamp: Date.now(),
+      timestamp: now,
+      expiredAt: now + CACHE_CONFIG.ttl, // 废弃时间为当前时间 + TTL
     };
 
     // 设置缓存，过期时间为 TTL
     await kv.set(key, entry, { px: CACHE_CONFIG.ttl });
-    console.log(`[Cache] 缓存响应: ${key}`);
+    console.log(`[Cache] 缓存响应: ${key} (废弃时间: ${new Date(entry.expiredAt).toISOString()})`);
   } catch (error) {
     console.log(`[Cache] 缓存响应失败: ${error}`);
   }
@@ -191,14 +202,17 @@ export async function cleanupCache(): Promise<void> {
 
     for await (const key of kv.scanIterator({ match: 'cache:*' })) {
       const value = await kv.get<CacheEntry>(key);
-      if (value && now - value.timestamp > CACHE_CONFIG.ttl) {
-        await kv.del(key);
-        removedCount++;
+      if (value) {
+        // 检查是否已废弃或过期
+        if (now > value.expiredAt || now - value.timestamp > CACHE_CONFIG.ttl) {
+          await kv.del(key);
+          removedCount++;
+        }
       }
     }
 
     if (removedCount > 0) {
-      console.log(`[Cache] 清理了 ${removedCount} 个过期缓存`);
+      console.log(`[Cache] 清理了 ${removedCount} 个过期/废弃缓存`);
     }
   } catch (error) {
     console.log(`[Cache] 清理缓存失败: ${error}`);
