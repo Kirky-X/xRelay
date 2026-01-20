@@ -22,6 +22,7 @@
         <!-- Logo -->
         <div class="logo-container">
           <img src="/xRelay.png" alt="xRelay Logo" />
+          <div class="logo-text">xRelay</div>
         </div>
 
         <!-- 打字机效果 -->
@@ -208,6 +209,17 @@ header {
   width: 280px;
   height: auto;
   filter: drop-shadow(0 0 30px var(--glow-color));
+}
+
+.logo-text {
+  margin-top: 1rem;
+  font-size: 2.5rem;
+  font-weight: 700;
+  background: var(--primary-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.1em;
 }
 
 @keyframes float {
