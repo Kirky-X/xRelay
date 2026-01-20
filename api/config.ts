@@ -64,6 +64,14 @@ export const FEATURES = {
   enableCache: true,
   enableRateLimit: true,
   enableFallback: true,
+  enableApiKey: process.env.ENABLE_API_KEY === "true",
+};
+
+// API Key 配置
+export const API_KEY_CONFIG = {
+  enabled: process.env.ENABLE_API_KEY === "true",
+  keys: process.env.API_KEYS ? process.env.API_KEYS.split(",") : [],
+  headerName: process.env.API_KEY_HEADER || "x-api-key",
 };
 
 // 代理测试配置

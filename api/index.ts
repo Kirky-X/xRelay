@@ -8,7 +8,7 @@
  * 处理所有代理请求
  */
 
-import { SECURITY_CONFIG } from "./config";
+import { SECURITY_CONFIG, API_KEY_CONFIG } from "./config";
 import { validateUrl, isValidPublicIp } from "./security";
 import { checkGlobalRateLimit, checkIpRateLimit } from "./rate-limiter";
 import { getCachedResponse, cacheResponse } from "./cache";
@@ -34,18 +34,58 @@ export const config = {
 };
 
 /**
+ * 验证 API Key
+ */
+function validateApiKey(request: Request): boolean {
+  // 如果未启用 API Key 验证，直接通过
+  if (!API_KEY_CONFIG.enabled) {
+    return true;
+  }
+
+  // 如果没有配置任何 API Key，直接通过（避免误拦截）
+  if (API_KEY_CONFIG.keys.length === 0) {
+    return true;
+  }
+
+  // 获取请求中的 API Key
+  const apiKey = request.headers.get(API_KEY_CONFIG.headerName);
+  
+  if (!apiKey) {
+    return false;
+  }
+
+  // 检查 API Key 是否有效
+  return API_KEY_CONFIG.keys.includes(apiKey);
+}
+
+/**
  * 主处理函数
  */
 export default async function handler(request: Request): Promise<Response> {
   const startTime = Date.now();
 
-  // 1. 获取客户端 IP
+  // 1. 验证 API Key
+  if (!validateApiKey(request)) {
+    if (SECURITY_CONFIG.enableVerboseLogging) {
+      console.log(`[Main] API Key 验证失败`);
+    }
+    return createJsonResponse(
+      401,
+      {
+        error: "Unauthorized",
+        code: "INVALID_API_KEY",
+      },
+      request,
+    );
+  }
+
+  // 2. 获取客户端 IP
   const clientIp = getClientIp(request);
   if (SECURITY_CONFIG.enableVerboseLogging) {
     console.log(`[Main] 请求来自 IP: ${clientIp}`);
   }
 
-  // 2. 检查限流（全局）
+  // 3. 检查限流（全局）
   const globalLimit = checkGlobalRateLimit();
   if (!globalLimit.allowed) {
     if (SECURITY_CONFIG.enableVerboseLogging) {
@@ -62,7 +102,7 @@ export default async function handler(request: Request): Promise<Response> {
     );
   }
 
-  // 3. 检查限流（IP 级别）
+  // 4. 检查限流（IP 级别）
   const ipLimit = checkIpRateLimit(clientIp);
   if (!ipLimit.allowed) {
     if (SECURITY_CONFIG.enableVerboseLogging) {
@@ -79,7 +119,7 @@ export default async function handler(request: Request): Promise<Response> {
     );
   }
 
-  // 4. 处理 OPTIONS 请求（CORS 预检）
+  // 5. 处理 OPTIONS 请求（CORS 预检）
   if (request.method === "OPTIONS") {
     const origin = request.headers.get("origin");
     const allowedOrigins = [
@@ -94,13 +134,13 @@ export default async function handler(request: Request): Promise<Response> {
       headers: {
         "Access-Control-Allow-Origin": corsOrigin,
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Headers": "Content-Type, x-api-key",
         "Access-Control-Max-Age": "86400",
       },
     });
   }
 
-  // 5. 只允许 POST 请求
+  // 6. 只允许 POST 请求
   if (request.method !== "POST") {
     return createJsonResponse(
       405,
@@ -113,7 +153,7 @@ export default async function handler(request: Request): Promise<Response> {
     );
   }
 
-  // 6. 解析请求体
+  // 7. 解析请求体
   let body: RequestBody;
   try {
     body = await request.json();
@@ -148,7 +188,7 @@ export default async function handler(request: Request): Promise<Response> {
     );
   }
 
-  // 7. 验证必需字段
+  // 8. 验证必需字段
   if (!body.url) {
     return createJsonResponse(
       400,
@@ -160,7 +200,7 @@ export default async function handler(request: Request): Promise<Response> {
     );
   }
 
-  // 8. 验证 URL
+  // 9. 验证 URL
   const urlValidation = validateUrl(body.url);
   if (!urlValidation.valid) {
     if (SECURITY_CONFIG.enableVerboseLogging) {
@@ -177,7 +217,7 @@ export default async function handler(request: Request): Promise<Response> {
     );
   }
 
-  // 9. 检查缓存
+  // 10. 检查缓存
   let useCache = body.useCache !== false; // 默认启用缓存
   if (useCache) {
     const cached = getCachedResponse(body.url, body.method || "GET");
@@ -189,7 +229,7 @@ export default async function handler(request: Request): Promise<Response> {
     }
   }
 
-  // 10. 处理代理请求
+  // 11. 处理代理请求
   try {
     const proxyRequest: ProxyRequest = {
       url: body.url,
@@ -277,7 +317,7 @@ function createJsonResponse(
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": corsOrigin,
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Headers": "Content-Type, x-api-key",
       "Cache-Control": "no-cache",
     },
   });
