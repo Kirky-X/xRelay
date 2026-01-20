@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="./xRelay.png" alt="xRelay Logo" width="120" />
+<img src="public/xRelay.png" alt="xRelay Logo" width="120" />
+
+# xRelay
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)](https://www.typescriptlang.org/) [![Tests](https://img.shields.io/badge/Tests-28%20passing-green.svg)](https://github.com/your-repo/xRelay) [![Version](https://img.shields.io/badge/version-1.0.0-orange.svg)](https://github.com/your-repo/xRelay)
 
