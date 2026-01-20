@@ -30,7 +30,7 @@ const CONFIG = {
 };
 
 export const config = {
-  runtime: "edge",
+  runtime: "nodejs18",
 };
 
 /**

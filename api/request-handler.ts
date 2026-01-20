@@ -54,6 +54,12 @@ async function sendRequestWithProxy(
   console.log(`[RequestHandler] 使用代理: ${proxy.ip}:***`);
 
   try {
+    // 使用 undici 的 ProxyAgent 实现真正的代理
+    const { ProxyAgent, setGlobalDispatcher, request: undiciRequest } = await import('undici');
+    
+    const proxyAgent = new ProxyAgent(`http://${proxy.ip}:${proxy.port}`);
+    setGlobalDispatcher(proxyAgent);
+
     const controller = new AbortController();
     const timeoutId = setTimeout(
       () => controller.abort(),
@@ -73,6 +79,9 @@ async function sendRequestWithProxy(
 
     const response = await fetch(request.url, fetchOptions);
     clearTimeout(timeoutId);
+
+    // 重置全局 dispatcher
+    setGlobalDispatcher(null);
 
     const headers: Record<string, string> = {};
     response.headers.forEach((value, key) => {
