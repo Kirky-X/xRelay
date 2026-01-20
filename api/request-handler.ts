@@ -277,17 +277,19 @@ export async function sendProxyRequest(
 }
 
 /**
- * 并行尝试多个代理（用于快速获取结果）
+ * 通过多个代理串行尝试发送请求（失败则切换代理或 Fallback）
  */
 export async function sendRequestWithMultipleProxies(
   request: ProxyRequest,
   proxyCount: number = 3,
 ): Promise<ProxyResponse> {
-  console.log(`[RequestHandler] 并行尝试 ${proxyCount} 个代理`);
+  console.log(`[RequestHandler] 串行尝试最多 ${proxyCount} 个代理`);
 
+  // 获取代理（最多 proxyCount 个，不足则获取所有可用代理）
   const proxies = await getMultipleProxies(proxyCount);
 
   if (proxies.length === 0) {
+    console.log(`[RequestHandler] 没有可用代理，直接使用直连`);
     // 没有代理，直接直连
     const result = await sendRequestDirect(request);
     return {
@@ -303,46 +305,53 @@ export async function sendRequestWithMultipleProxies(
     };
   }
 
-  // 并行发送请求
-  const results = await Promise.all(
-    proxies.map(async (proxy) => {
-      const result = await sendRequestWithProxy(request, proxy);
-      return { proxy, result };
-    }),
-  );
+  console.log(`[RequestHandler] 获取到 ${proxies.length} 个代理`);
 
-  // 找到第一个成功的
-  for (const { proxy, result } of results) {
-    if (result.success) {
-      reportProxySuccess(proxy);
-      return {
-        success: true,
-        data: result.data,
-        status: result.status,
-        headers: result.headers,
-        proxyUsed: true,
-        proxyIp: `${proxy.ip}:${proxy.port}`,
-        proxySuccess: true,
-        fallbackUsed: false,
-      };
-    } else {
+  // 串行尝试每个代理
+  for (let i = 0; i < proxies.length; i++) {
+    const proxy = proxies[i];
+    console.log(`[RequestHandler] 尝试代理 ${i + 1}/${proxies.length}: ${proxy.ip}:${proxy.port}`);
+
+    try {
+      const result = await sendRequestWithProxy(request, proxy);
+
+      if (result.success) {
+        console.log(`[RequestHandler] 代理请求成功`);
+        reportProxySuccess(proxy);
+        return {
+          success: true,
+          data: result.data,
+          status: result.status,
+          headers: result.headers,
+          proxyUsed: true,
+          proxyIp: `${proxy.ip}:${proxy.port}`,
+          proxySuccess: true,
+          fallbackUsed: false,
+        };
+      } else {
+        console.log(`[RequestHandler] 代理请求失败: ${result.error}`);
+        reportProxyFailed(proxy);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.log(`[RequestHandler] 代理请求异常: ${errorMessage}`);
       reportProxyFailed(proxy);
     }
   }
 
-  // 全部失败，尝试 Fallback
-  console.log(`[RequestHandler] 所有并行代理失败，尝试直连`);
-  const fallbackResult = await sendRequestDirect(request);
+  // 所有代理都失败，回退到直连
+  console.log(`[RequestHandler] 所有 ${proxies.length} 个代理都失败，回退到直连`);
+  const directResult = await sendRequestDirect(request);
 
   return {
-    success: fallbackResult.success,
-    data: fallbackResult.data,
-    status: fallbackResult.status,
-    headers: fallbackResult.headers,
+    success: directResult.success,
+    data: directResult.data,
+    status: directResult.status,
+    headers: directResult.headers,
     proxyUsed: false,
     proxyIp: null,
     proxySuccess: false,
     fallbackUsed: true,
-    error: fallbackResult.success ? undefined : fallbackResult.error,
+    error: directResult.success ? undefined : directResult.error,
   };
 }
