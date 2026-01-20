@@ -31,6 +31,10 @@ const CONFIG = {
   enableCache: true
 };
 
+export const config = {
+  runtime: 'edge',
+};
+
 /**
  * 主处理函数
  */
