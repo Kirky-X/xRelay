@@ -34,8 +34,6 @@ yarn-error.log*
 
 # Tools
 .trae/
-
-#iflow, .trae, openspec
 .iflow/
 .openspec/
 
