@@ -427,6 +427,7 @@ header {
   padding: 2rem;
   backdrop-filter: blur(10px);
   transition: all 0.3s ease;
+  text-align: center;
 }
 
 .feature-card:hover {
@@ -442,7 +443,7 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 1rem;
+  margin: 0 auto 1rem auto;
   font-size: 1.5rem;
 }
 
