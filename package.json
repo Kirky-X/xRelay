@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@vercel/edge": "^1.1.1",
+    "@vercel/kv": "^3.0.0",
     "diff": "^8.0.3",
     "esbuild": "^0.24.2",
     "path-to-regexp": "^6.3.0"

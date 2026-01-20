@@ -86,7 +86,7 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   // 3. 检查限流（全局）
-  const globalLimit = checkGlobalRateLimit();
+  const globalLimit = await checkGlobalRateLimit();
   if (!globalLimit.allowed) {
     if (SECURITY_CONFIG.enableVerboseLogging) {
       console.log(`[Main] 全局限流触发`);
@@ -103,7 +103,7 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   // 4. 检查限流（IP 级别）
-  const ipLimit = checkIpRateLimit(clientIp);
+  const ipLimit = await checkIpRateLimit(clientIp);
   if (!ipLimit.allowed) {
     if (SECURITY_CONFIG.enableVerboseLogging) {
       console.log(`[Main] IP限流触发`);
@@ -220,7 +220,7 @@ export default async function handler(request: Request): Promise<Response> {
   // 10. 检查缓存
   let useCache = body.useCache !== false; // 默认启用缓存
   if (useCache) {
-    const cached = getCachedResponse(body.url, body.method || "GET");
+    const cached = await getCachedResponse(body.url, body.method || "GET");
     if (cached) {
       if (SECURITY_CONFIG.enableVerboseLogging) {
         console.log(`[Main] 返回缓存响应`);
@@ -242,7 +242,7 @@ export default async function handler(request: Request): Promise<Response> {
 
     // 缓存成功的响应
     if (response.success && useCache) {
-      cacheResponse(body.url, body.method || "GET", response);
+      await cacheResponse(body.url, body.method || "GET", response);
     }
 
     const duration = Date.now() - startTime;
