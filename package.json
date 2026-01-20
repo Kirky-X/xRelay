@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vercel dev",
-    "build": "vercel build",
+    "build": "echo 'No build step required for Edge Functions'",
     "deploy": "vercel --prod",
     "test": "vitest run",
     "test:watch": "vitest"

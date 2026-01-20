@@ -1,3 +1,4 @@
 {
-  "regions": ["iad1", "sfo1", "sin1", "hnd1", "cdg1"]
+  "buildCommand": "echo 'Edge Function - no build required'",
+  "outputDirectory": "."
 }
