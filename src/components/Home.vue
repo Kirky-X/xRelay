@@ -195,7 +195,7 @@ header {
 }
 
 .logo-container img {
-  width: 200px;
+  width: 280px;
   height: auto;
   filter: drop-shadow(0 0 30px var(--glow-color));
 }
@@ -450,7 +450,7 @@ header {
   }
 
   .logo-container img {
-    width: 150px;
+    width: 200px;
   }
 
   .code-card {
