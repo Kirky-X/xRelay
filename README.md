@@ -1,6 +1,5 @@
 <div align="center">
-
-<img src="public/xRelay.png" alt="xRelay Logo" width="120" />
+<img src="public/xRelay.png" alt="xRelay Logo" width="180" />
 
 # xRelay
 
