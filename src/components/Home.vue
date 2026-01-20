@@ -155,8 +155,7 @@ onMounted(() => {
   left: -50%;
   width: 200%;
   height: 200%;
-  background: radial-gradient(circle at 30% 30%, rgba(255, 107, 157, 0.15) 0%, transparent 50%),
-              radial-gradient(circle at 70% 70%, rgba(255, 142, 83, 0.1) 0%, transparent 50%);
+  background: transparent;
   animation: bgRotate 20s linear infinite;
 }
 
