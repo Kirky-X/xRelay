@@ -1,19 +1,18 @@
 /**
+ * Copyright (c) 2026 Kirky-x
+ * License: MIT
+ */
+
+/**
  * Proxy Tester - 测试代理可用性
  * 快速检测代理是否可用，筛选出可用的代理
  */
 
-import type { ProxyInfo } from './proxy-fetcher';
-
-// 测试超时时间（毫秒）
-const TEST_TIMEOUT = 3000;
-
-// 测试目标 URL
-const TEST_URL = 'https://httpbin.org/ip';
+import type { ProxyInfo } from "./proxy-fetcher";
+import { PROXY_TEST_CONFIG } from "./config";
 
 // 代理黑名单（失败的代理）
 const failedProxyBlacklist = new Map<string, number>();
-const BLACKLIST_DURATION = 5 * 60 * 1000; // 5分钟冷却
 
 /**
  * 测试单个代理
@@ -24,8 +23,6 @@ export async function testProxy(proxy: ProxyInfo): Promise<{
   latency?: number;
   error?: string;
 }> {
-  const proxyUrl = `http://${proxy.ip}:${proxy.port}`;
-
   // 检查是否在黑名单中
   const blacklistKey = `${proxy.ip}:${proxy.port}`;
   const blacklistExpiry = failedProxyBlacklist.get(blacklistKey);
@@ -33,7 +30,7 @@ export async function testProxy(proxy: ProxyInfo): Promise<{
     return {
       success: false,
       proxy,
-      error: 'In blacklist'
+      error: "In blacklist",
     };
   }
 
@@ -41,15 +38,19 @@ export async function testProxy(proxy: ProxyInfo): Promise<{
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TEST_TIMEOUT);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      PROXY_TEST_CONFIG.testTimeout,
+    );
 
-    const response = await fetch(TEST_URL, {
-      method: 'GET',
+    const response = await fetch(PROXY_TEST_CONFIG.testUrl, {
+      method: "GET",
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Proxy-Connection': 'Keep-Alive'
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Proxy-Connection": "Keep-Alive",
       },
-      signal: controller.signal
+      signal: controller.signal,
     });
 
     clearTimeout(timeoutId);
@@ -57,18 +58,20 @@ export async function testProxy(proxy: ProxyInfo): Promise<{
     const latency = Date.now() - startTime;
 
     if (response.ok) {
-      console.log(`[ProxyTester] 代理可用: ${proxyUrl} (延迟: ${latency}ms)`);
+      console.log(
+        `[ProxyTester] 代理可用: ${proxy.ip}:*** (延迟: ${latency}ms)`,
+      );
       return {
         success: true,
         proxy,
-        latency
+        latency,
       };
     } else {
       markProxyAsFailed(proxy);
       return {
         success: false,
         proxy,
-        error: `HTTP ${response.status}`
+        error: `HTTP ${response.status}`,
       };
     }
   } catch (error) {
@@ -76,7 +79,7 @@ export async function testProxy(proxy: ProxyInfo): Promise<{
     return {
       success: false,
       proxy,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 }
@@ -87,7 +90,7 @@ export async function testProxy(proxy: ProxyInfo): Promise<{
 export async function testProxiesInBatch(
   proxies: ProxyInfo[],
   maxWorkers: number = 5,
-  minSuccessCount: number = 3
+  minSuccessCount: number = 3,
 ): Promise<ProxyInfo[]> {
   if (proxies.length === 0) {
     return [];
@@ -101,7 +104,7 @@ export async function testProxiesInBatch(
   for (let i = 0; i < proxies.length; i += maxWorkers) {
     const batch = proxies.slice(i, i + maxWorkers);
     const batchResults = await Promise.all(
-      batch.map(proxy => testProxy(proxy))
+      batch.map((proxy) => testProxy(proxy)),
     );
 
     for (const result of batchResults) {
@@ -112,7 +115,9 @@ export async function testProxiesInBatch(
 
     // 如果已经找到足够的可用代理，提前结束
     if (results.length >= minSuccessCount) {
-      console.log(`[ProxyTester] 已找到 ${results.length} 个可用代理，提前结束测试`);
+      console.log(
+        `[ProxyTester] 已找到 ${results.length} 个可用代理，提前结束测试`,
+      );
       break;
     }
   }
@@ -122,29 +127,34 @@ export async function testProxiesInBatch(
     results.map(async (r) => {
       const testResult = await testProxy(r.proxy);
       return testResult;
-    })
+    }),
   );
 
-  sortedResults.sort((a, b) => (a.latency || Infinity) - (b.latency || Infinity));
+  sortedResults.sort(
+    (a, b) => (a.latency || Infinity) - (b.latency || Infinity),
+  );
 
-  console.log(`[ProxyTester] 测试完成，找到 ${sortedResults.length} 个可用代理`);
+  console.log(
+    `[ProxyTester] 测试完成，找到 ${sortedResults.length} 个可用代理`,
+  );
 
-  return sortedResults.map(r => r.proxy);
+  return sortedResults.map((r) => r.proxy);
 }
 
 /**
  * 快速检测代理是否可用（非严格测试）
  */
-export async function quickTestProxy(proxy: ProxyInfo): Promise<boolean> {
-  const proxyUrl = `http://${proxy.ip}:${proxy.port}`;
-
+export async function quickTestProxy(_proxy: ProxyInfo): Promise<boolean> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      PROXY_TEST_CONFIG.quickTestTimeout,
+    );
 
-    const response = await fetch(TEST_URL, {
-      method: 'HEAD',
-      signal: controller.signal
+    const response = await fetch(PROXY_TEST_CONFIG.testUrl, {
+      method: "HEAD",
+      signal: controller.signal,
     });
 
     clearTimeout(timeoutId);
@@ -159,7 +169,7 @@ export async function quickTestProxy(proxy: ProxyInfo): Promise<boolean> {
  */
 export async function quickTestProxies(
   proxies: ProxyInfo[],
-  timeoutPerProxy: number = 2000
+  timeoutPerProxy: number = PROXY_TEST_CONFIG.quickTestTimeout,
 ): Promise<ProxyInfo[]> {
   console.log(`[ProxyTester] 快速测试 ${proxies.length} 个代理...`);
 
@@ -169,9 +179,9 @@ export async function quickTestProxies(
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutPerProxy);
 
-        const response = await fetch(TEST_URL, {
-          method: 'HEAD',
-          signal: controller.signal
+        const response = await fetch(PROXY_TEST_CONFIG.testUrl, {
+          method: "HEAD",
+          signal: controller.signal,
         });
 
         clearTimeout(timeoutId);
@@ -183,7 +193,7 @@ export async function quickTestProxies(
         // 测试失败，忽略
       }
       return null;
-    })
+    }),
   );
 
   const availableProxies = results.filter((p): p is ProxyInfo => p !== null);
@@ -197,8 +207,11 @@ export async function quickTestProxies(
  */
 function markProxyAsFailed(proxy: ProxyInfo): void {
   const key = `${proxy.ip}:${proxy.port}`;
-  failedProxyBlacklist.set(key, Date.now() + BLACKLIST_DURATION);
-  console.log(`[ProxyTester] 代理失效: ${key}，加入黑名单`);
+  failedProxyBlacklist.set(
+    key,
+    Date.now() + PROXY_TEST_CONFIG.blacklistDuration,
+  );
+  console.log(`[ProxyTester] 代理失效: ${proxy.ip}:***，加入黑名单`);
 }
 
 /**
@@ -211,7 +224,9 @@ export function cleanupBlacklist(): void {
       failedProxyBlacklist.delete(key);
     }
   }
-  console.log(`[ProxyTester] 黑名单清理完成，剩余 ${failedProxyBlacklist.size} 个`);
+  console.log(
+    `[ProxyTester] 黑名单清理完成，剩余 ${failedProxyBlacklist.size} 个`,
+  );
 }
 
 /**
@@ -221,6 +236,6 @@ export function getBlacklistStatus(): { size: number; samples: string[] } {
   const samples = Array.from(failedProxyBlacklist.keys()).slice(0, 5);
   return {
     size: failedProxyBlacklist.size,
-    samples
+    samples,
   };
 }

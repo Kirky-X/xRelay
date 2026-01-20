@@ -1,19 +1,21 @@
 /**
+ * Copyright (c) 2026 Kirky-x
+ * License: MIT
+ */
+
+/**
  * Request Handler - 请求转发与 Fallback 机制
  * 核心功能：代理请求 → 失败切换 → Fallback 直连
  */
 
-import type { ProxyInfo } from './proxy-fetcher';
+import type { ProxyInfo } from "./proxy-fetcher";
 import {
   getAvailableProxy,
   getMultipleProxies,
   reportProxyFailed,
-  reportProxySuccess
-} from './proxy-manager';
-
-// 请求超时时间
-const PROXY_REQUEST_TIMEOUT = 8000; // 8秒
-const DIRECT_REQUEST_TIMEOUT = 10000; // 10秒
+  reportProxySuccess,
+} from "./proxy-manager";
+import { REQUEST_TIMEOUT_CONFIG } from "./config";
 
 // 请求类型定义
 export interface ProxyRequest {
@@ -38,7 +40,7 @@ export interface ProxyResponse {
  */
 async function sendRequestWithProxy(
   request: ProxyRequest,
-  proxy: ProxyInfo
+  proxy: ProxyInfo,
 ): Promise<{
   success: boolean;
   data?: string;
@@ -46,26 +48,23 @@ async function sendRequestWithProxy(
   headers?: Record<string, string>;
   error?: string;
 }> {
-  const proxyUrl = `http://${proxy.ip}:${proxy.port}`;
-
-  console.log(`[RequestHandler] 使用代理: ${proxyUrl}`);
+  console.log(`[RequestHandler] 使用代理: ${proxy.ip}:***`);
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), PROXY_REQUEST_TIMEOUT);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      REQUEST_TIMEOUT_CONFIG.proxy,
+    );
 
     // 构建请求
     const fetchOptions: RequestInit = {
       method: request.method,
-      headers: {
-        ...request.headers,
-        'Proxy-Authorization': `Basic ${btoa(`${proxy.ip}:${proxy.port}`)}`,
-        'X-Forwarded-For': proxy.ip
-      },
-      signal: controller.signal
+      headers: request.headers || {},
+      signal: controller.signal,
     };
 
-    if (request.body && ['POST', 'PUT', 'PATCH'].includes(request.method)) {
+    if (request.body && ["POST", "PUT", "PATCH"].includes(request.method)) {
       fetchOptions.body = request.body;
     }
 
@@ -84,21 +83,22 @@ async function sendRequestWithProxy(
         success: true,
         data: text,
         status: response.status,
-        headers
+        headers,
       };
     } else {
       return {
         success: false,
         error: `HTTP ${response.status}`,
-        data: text
+        data: text,
       };
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
     console.log(`[RequestHandler] 代理请求失败: ${errorMessage}`);
     return {
       success: false,
-      error: errorMessage
+      error: errorMessage,
     };
   }
 }
@@ -106,9 +106,7 @@ async function sendRequestWithProxy(
 /**
  * 直接发送请求（不使用代理）
  */
-async function sendRequestDirect(
-  request: ProxyRequest
-): Promise<{
+async function sendRequestDirect(request: ProxyRequest): Promise<{
   success: boolean;
   data?: string;
   status?: number;
@@ -119,15 +117,18 @@ async function sendRequestDirect(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), DIRECT_REQUEST_TIMEOUT);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      REQUEST_TIMEOUT_CONFIG.direct,
+    );
 
     const fetchOptions: RequestInit = {
       method: request.method,
       headers: request.headers || {},
-      signal: controller.signal
+      signal: controller.signal,
     };
 
-    if (request.body && ['POST', 'PUT', 'PATCH'].includes(request.method)) {
+    if (request.body && ["POST", "PUT", "PATCH"].includes(request.method)) {
       fetchOptions.body = request.body;
     }
 
@@ -145,14 +146,15 @@ async function sendRequestDirect(
       success: response.ok,
       data: text,
       status: response.status,
-      headers
+      headers,
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
     console.log(`[RequestHandler] 直连请求失败: ${errorMessage}`);
     return {
       success: false,
-      error: errorMessage
+      error: errorMessage,
     };
   }
 }
@@ -165,13 +167,18 @@ export async function sendProxyRequest(
   options: {
     maxProxyAttempts?: number;
     useFallback?: boolean;
-  } = {}
+  } = {},
 ): Promise<ProxyResponse> {
   const maxProxyAttempts = options.maxProxyAttempts || 3;
   const useFallback = options.useFallback !== false;
 
-  console.log(`[RequestHandler] 开始处理请求: ${request.url}`);
-  console.log(`[RequestHandler] 最大代理尝试次数: ${maxProxyAttempts}, Fallback: ${useFallback}`);
+  const urlObj = new URL(request.url);
+  console.log(
+    `[RequestHandler] 开始处理请求: ${request.method} ${urlObj.hostname}`,
+  );
+  console.log(
+    `[RequestHandler] 最大代理尝试次数: ${maxProxyAttempts}, Fallback: ${useFallback}`,
+  );
 
   // 1. 尝试使用代理
   for (let attempt = 0; attempt < maxProxyAttempts; attempt++) {
@@ -195,10 +202,10 @@ export async function sendProxyRequest(
         data: result.data,
         status: result.status,
         headers: result.headers,
-        usedProxy: `${proxy.ip}:${proxy.port}`
+        usedProxy: `${proxy.ip}:${proxy.port}`,
       };
     } else {
-      console.log(`[RequestHandler] 代理请求失败: ${result.error}`);
+      console.log(`[RequestHandler] 代理请求失败`);
       reportProxyFailed(proxy);
     }
   }
@@ -217,14 +224,14 @@ export async function sendProxyRequest(
         data: result.data,
         status: result.status,
         headers: result.headers,
-        fallbackUsed: true
+        fallbackUsed: true,
       };
     } else {
-      console.log(`[RequestHandler] 直连失败: ${result.error}`);
+      console.log(`[RequestHandler] 直连失败`);
 
       return {
         success: false,
-        error: `代理失败，直连也失败: ${result.error}`
+        error: `代理失败，直连也失败`,
       };
     }
   }
@@ -232,7 +239,7 @@ export async function sendProxyRequest(
   // 3. 不使用 Fallback，直接返回失败
   return {
     success: false,
-    error: '所有代理尝试失败'
+    error: "所有代理尝试失败",
   };
 }
 
@@ -241,7 +248,7 @@ export async function sendProxyRequest(
  */
 export async function sendRequestWithMultipleProxies(
   request: ProxyRequest,
-  proxyCount: number = 3
+  proxyCount: number = 3,
 ): Promise<ProxyResponse> {
   console.log(`[RequestHandler] 并行尝试 ${proxyCount} 个代理`);
 
@@ -249,12 +256,12 @@ export async function sendRequestWithMultipleProxies(
 
   if (proxies.length === 0) {
     // 没有代理，直接直连
-    return sendRequestDirect(request).then(result => ({
+    return sendRequestDirect(request).then((result) => ({
       success: result.success,
       data: result.data,
       status: result.status,
       headers: result.headers,
-      fallbackUsed: true
+      fallbackUsed: true,
     }));
   }
 
@@ -263,7 +270,7 @@ export async function sendRequestWithMultipleProxies(
     proxies.map(async (proxy) => {
       const result = await sendRequestWithProxy(request, proxy);
       return { proxy, result };
-    })
+    }),
   );
 
   // 找到第一个成功的
@@ -275,7 +282,7 @@ export async function sendRequestWithMultipleProxies(
         data: result.data,
         status: result.status,
         headers: result.headers,
-        usedProxy: `${proxy.ip}:${proxy.port}`
+        usedProxy: `${proxy.ip}:${proxy.port}`,
       };
     } else {
       reportProxyFailed(proxy);
@@ -292,6 +299,6 @@ export async function sendRequestWithMultipleProxies(
     status: fallbackResult.status,
     headers: fallbackResult.headers,
     error: fallbackResult.success ? undefined : fallbackResult.error,
-    fallbackUsed: true
+    fallbackUsed: true,
   };
 }

@@ -1,14 +1,26 @@
-# Vercel Proxy Shield
+<div align="center">
+
+<img src="./xRelay.png" alt="xRelay Logo" width="120" />
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)](https://www.typescriptlang.org/) [![Tests](https://img.shields.io/badge/Tests-28%20passing-green.svg)](https://github.com/your-repo/xRelay) [![Version](https://img.shields.io/badge/version-1.0.0-orange.svg)](https://github.com/your-repo/xRelay)
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fyour-repo%2FxRelay)
 
 在 Vercel 部署的免费代理转发服务，支持免费代理池 + Fallback 直连。
 
+**[📚 查看架构设计文档](./ARCHITECTURE.md)**
+
+</div>
+
+---
+
 ## 功能特性
 
-- **免费代理池** - 自动从多个免费源获取代理
-- **Fallback 机制** - 代理失败时自动切换到 Vercel 直连
-- **请求限流** - 防止滥用，保护资源
-- **响应缓存** - 减少重复请求
-- **IP 隐藏** - 隐藏本地 IP，保护隐私
+- **🛡️ 免费代理池** - 自动从多个免费源获取代理
+- **🔄 Fallback 机制** - 代理失败时自动切换到 Vercel 直连
+- **🚦 请求限流** - 防止滥用，保护资源
+- **💾 响应缓存** - 减少重复请求
+- **🕵️ IP 隐藏** - 隐藏本地 IP，保护隐私
 
 ## 使用方法
 
@@ -78,12 +90,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| url | 是 | 目标 URL |
-| method | 否 | HTTP 方法，默认为 GET |
-| headers | 否 | 自定义请求头 |
-| useCache | 否 | 是否使用缓存，默认为 true |
+| 字段     | 必填 | 说明                      |
+| -------- | ---- | ------------------------- |
+| url      | 是   | 目标 URL                  |
+| method   | 否   | HTTP 方法，默认为 GET     |
+| headers  | 否   | 自定义请求头              |
+| useCache | 否   | 是否使用缓存，默认为 true |
 
 ### 响应格式
 

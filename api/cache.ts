@@ -1,13 +1,15 @@
 /**
+ * Copyright (c) 2026 Kirky-x
+ * License: MIT
+ */
+
+/**
  * Cache - 响应缓存
  * 对相同 URL 的请求进行缓存，减少重复请求
  */
 
-import type { ProxyResponse } from './request-handler';
-
-// 缓存配置
-const CACHE_TTL = 5 * 60 * 1000; // 5分钟
-const MAX_CACHE_SIZE = 100; // 最大缓存条目数
+import type { ProxyResponse } from "./request-handler";
+import { CACHE_CONFIG } from "./config";
 
 // 缓存条目
 interface CacheEntry {
@@ -31,7 +33,7 @@ function generateCacheKey(url: string, method: string): string {
  */
 export function getCachedResponse(
   url: string,
-  method: string
+  method: string,
 ): ProxyResponse | null {
   const key = generateCacheKey(url, method);
   const entry = cacheStore.get(key);
@@ -43,7 +45,7 @@ export function getCachedResponse(
   const now = Date.now();
 
   // 检查是否过期
-  if (now - entry.timestamp > CACHE_TTL) {
+  if (now - entry.timestamp > CACHE_CONFIG.ttl) {
     console.log(`[Cache] 缓存过期，删除: ${key}`);
     cacheStore.delete(key);
     return null;
@@ -62,7 +64,7 @@ export function getCachedResponse(
 export function cacheResponse(
   url: string,
   method: string,
-  response: ProxyResponse
+  response: ProxyResponse,
 ): void {
   // 只缓存成功的响应
   if (!response.success) {
@@ -73,7 +75,7 @@ export function cacheResponse(
   const key = generateCacheKey(url, method);
 
   // 如果缓存已满，删除最旧的条目
-  if (cacheStore.size >= MAX_CACHE_SIZE) {
+  if (cacheStore.size >= CACHE_CONFIG.maxSize) {
     let oldestKey: string | null = null;
     let oldestTimestamp = Infinity;
 
@@ -93,7 +95,7 @@ export function cacheResponse(
   cacheStore.set(key, {
     key,
     response,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
 
   console.log(`[Cache] 缓存响应: ${key}`);
@@ -117,8 +119,8 @@ export function getCacheStatus(): {
 } {
   return {
     size: cacheStore.size,
-    maxSize: MAX_CACHE_SIZE,
-    ttlMs: CACHE_TTL
+    maxSize: CACHE_CONFIG.maxSize,
+    ttlMs: CACHE_CONFIG.ttl,
   };
 }
 
@@ -130,7 +132,7 @@ export function cleanupCache(): void {
   let removedCount = 0;
 
   for (const [key, entry] of cacheStore.entries()) {
-    if (now - entry.timestamp > CACHE_TTL) {
+    if (now - entry.timestamp > CACHE_CONFIG.ttl) {
       cacheStore.delete(key);
       removedCount++;
     }

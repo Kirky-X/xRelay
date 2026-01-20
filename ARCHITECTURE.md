@@ -1,0 +1,194 @@
+<div align="center">
+
+# 🏗️ xRelay Architecture Design
+
+### Technical Architecture & Design Decisions
+
+[🏠 Home](./README.md) • [🔧 API Docs](./README.md#api-文档)
+
+---
+
+</div>
+
+## 📋 Table of Contents
+
+- [Overview](#overview)
+- [System Architecture](#system-architecture)
+- [Component Design](#component-design)
+- [Data Flow](#data-flow)
+- [Design Decisions](#design-decisions)
+- [Technology Stack](#technology-stack)
+- [Security Architecture](#security-architecture)
+
+---
+
+## Overview
+
+<div align="center">
+
+### 🎯 Architecture Goals
+
+</div>
+
+<table>
+<tr>
+<td width="25%" align="center">
+<img src="https://img.icons8.com/fluency/96/000000/speed.png" width="64"><br>
+<b>Performance</b><br>
+Vercel Edge Functions
+</td>
+<td width="25%" align="center">
+<img src="https://img.icons8.com/fluency/96/000000/security-checked.png" width="64"><br>
+<b>Reliability</b><br>
+Smart Fallback Mechanism
+</td>
+<td width="25%" align="center">
+<img src="https://img.icons8.com/fluency/96/000000/module.png" width="64"><br>
+<b>Anonymity</b><br>
+Dynamic Proxy Pool
+</td>
+<td width="25%" align="center">
+<img src="https://img.icons8.com/fluency/96/000000/maintenance.png" width="64"><br>
+<b>Protection</b><br>
+Rate Limiting
+</td>
+</tr>
+</table>
+
+### Design Principles
+
+> 🎯 **Simplicity**: Minimalist codebase leveraging Vercel's infrastructure.
+>
+> 🔄 **Resilience**: Always ensure the request succeeds, either via proxy or direct fallback.
+>
+> ⚡ **Edge First**: Execute logic close to the user for minimal latency.
+
+---
+
+## System Architecture
+
+<div align="center">
+
+### 🏛️ High-Level Architecture
+
+</div>
+
+```mermaid
+graph TB
+    subgraph "Client Side"
+        A[User / Client App]
+    end
+
+    subgraph "Vercel Edge Network"
+        B[Edge Function Entry]
+        C[Rate Limiter]
+        D[Request Validator]
+        E[Proxy Logic Controller]
+    end
+
+    subgraph "External Resources"
+        F[Free Proxy Pool]
+        G[Target Server]
+    end
+
+    A -- POST Request --> B
+    B --> C
+    C -- Allowed --> D
+    D -- Valid --> E
+
+    E -- 1. Try Proxy --> F
+    F -- Forward --> G
+
+    E -- 2. Fallback (If Proxy Fails) --> G
+
+    G -- Response --> E
+    E -- Response --> A
+
+    style A fill:#e1f5ff
+    style B fill:#b3e5fc
+    style C fill:#81d4fa
+    style D fill:#81d4fa
+    style E fill:#4fc3f7
+    style F fill:#ef9a9a
+    style G fill:#a5d6a7
+```
+
+---
+
+## Component Design
+
+### 1️⃣ Edge Function Entry (`api/index.ts`)
+
+The entry point for all requests. It runs on Vercel's Edge Runtime, ensuring low latency and high availability.
+
+- **Responsibilities**:
+  - Request parsing
+  - Response formatting
+  - Error handling
+
+### 2️⃣ Proxy Manager
+
+Manages the lifecycle of proxy selection and usage.
+
+- **Strategy**: Fetches proxies from a curated list of free proxy providers.
+- **Validation**: Checks if a proxy is alive before using it (optimistic or pre-check).
+- **Rotation**: Selects a random proxy for each request to maximize anonymity.
+
+### 3️⃣ Fallback Mechanism
+
+Ensures high success rates.
+
+- **Trigger**: Network timeout, connection refused, or HTTP 5xx from proxy.
+- **Action**: Retries the request directly from the Vercel Edge node.
+- **Transparency**: Returns a header indicating if fallback was used (`X-Fallback-Used`).
+
+---
+
+## Data Flow
+
+1.  **Incoming Request**: Client sends a POST request with `url`, `method`, and `headers`.
+2.  **Validation**: System checks for required fields and validates headers.
+3.  **Rate Limit Check**: Checks if the IP or global rate limit has been exceeded.
+4.  **Proxy Attempt**:
+    - Select a proxy from the pool.
+    - Forward request via proxy.
+    - If successful, return response.
+5.  **Fallback (On Failure)**:
+    - Log proxy failure.
+    - Directly fetch the target URL from Vercel Edge.
+6.  **Response**: Return the data to the client with execution metadata.
+
+---
+
+## Design Decisions
+
+### Why Vercel Edge Functions?
+
+- **Global Distribution**: Code runs close to the user.
+- **No Cold Starts**: Faster than traditional serverless functions.
+- **Cost Effective**: Generous free tier for hobbyist projects.
+
+### Why Fallback to Direct?
+
+- Free proxies are unreliable.
+- The primary goal is to **get the data**.
+- Direct Vercel requests hide the client's IP, which is often sufficient privacy.
+
+---
+
+## Technology Stack
+
+- **Runtime**: Node.js / Vercel Edge Runtime
+- **Language**: TypeScript
+- **Testing**: Vitest
+- **Deployment**: Vercel
+
+---
+
+## Security Architecture
+
+- **IP Hiding**: The target server sees the Proxy IP or Vercel's IP, never the User's IP.
+- **Rate Limiting**:
+  - **Global**: Protects against system-wide abuse.
+  - **Per IP**: Prevents individual users from hogging resources.
+- **Header Sanitization**: Removes sensitive headers before forwarding.
