@@ -302,6 +302,7 @@ header {
   color: #e2e8f0;
   cursor: pointer;
   transition: background 0.3s ease;
+  text-align: left;
 }
 
 .code-content:hover {
