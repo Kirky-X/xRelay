@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "node server.js",
     "build:frontend": "vite build",
     "preview": "vite preview",
     "deploy": "vercel --prod",
