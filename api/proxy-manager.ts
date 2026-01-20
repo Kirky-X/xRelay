@@ -52,6 +52,10 @@ const proxyPool: ProxyPoolState = {
   refreshCount: 0,
 };
 
+// 初始化状态
+let isInitialized = false;
+let initPromise: Promise<void> | null = null;
+
 // 数据库模式标志
 let isDatabaseMode = false;
 
@@ -59,19 +63,49 @@ let isDatabaseMode = false;
  * 初始化代理管理器
  */
 export async function initProxyManager(): Promise<void> {
-  console.log("[ProxyManager] 初始化代理管理器...");
-
-  // 尝试初始化数据库
-  const dbInitialized = await initDatabase();
-  isDatabaseMode = dbInitialized;
-
-  if (isDatabaseMode) {
-    console.log("[ProxyManager] 使用数据库模式");
-    await loadProxiesFromDatabase();
-  } else {
-    console.log("[ProxyManager] 使用内存模式");
-    await refreshProxyPool();
+  // 防止重复初始化
+  if (isInitialized) {
+    return;
   }
+
+  // 如果已经在初始化中，等待完成
+  if (initPromise) {
+    return initPromise;
+  }
+
+  // 开始初始化
+  initPromise = (async () => {
+    try {
+      console.log("[ProxyManager] 初始化代理管理器...");
+
+      // 尝试初始化数据库（带超时）
+      const dbInitialized = await Promise.race([
+        initDatabase(),
+        new Promise<boolean>((_, reject) =>
+          setTimeout(() => reject(new Error("Database initialization timeout")), 10000)
+        )
+      ]) as unknown as boolean;
+
+      isDatabaseMode = dbInitialized;
+
+      if (isDatabaseMode) {
+        console.log("[ProxyManager] 使用数据库模式");
+        await loadProxiesFromDatabase();
+      } else {
+        console.log("[ProxyManager] 使用内存模式");
+        await refreshProxyPool();
+      }
+
+      isInitialized = true;
+    } catch (error) {
+      console.error("[ProxyManager] 初始化失败，使用内存模式:", error);
+      isDatabaseMode = false;
+      await refreshProxyPool();
+      isInitialized = true;
+    }
+  })();
+
+  return initPromise;
 }
 
 /**
@@ -144,6 +178,9 @@ async function loadProxiesFromPool(): Promise<void> {
  * 获取可用的代理（自动刷新池）
  */
 export async function getAvailableProxy(): Promise<ProxyInfo | null> {
+  // 确保代理管理器已初始化
+  await initProxyManager();
+
   if (isDatabaseMode) {
     return getAvailableProxyFromDatabase();
   } else {
@@ -213,6 +250,9 @@ async function getAvailableProxyFromMemory(): Promise<ProxyInfo | null> {
  * 获取多个代理用于并行请求
  */
 export async function getMultipleProxies(count: number): Promise<ProxyInfo[]> {
+  // 确保代理管理器已初始化
+  await initProxyManager();
+
   if (isDatabaseMode) {
     return getMultipleProxiesFromDatabase(count);
   } else {

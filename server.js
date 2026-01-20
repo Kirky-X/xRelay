@@ -4,15 +4,11 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import handler from './dist/api/index.js';
-import { initProxyManager } from './dist/api/proxy-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const PORT = 3000;
-
-// 初始化代理管理器（包括数据库）
-await initProxyManager();
 
 const server = createServer(async (req, res) => {
   // 处理 API 请求
