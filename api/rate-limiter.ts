@@ -56,6 +56,10 @@ export async function checkGlobalRateLimit(): Promise<{
 }> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return { allowed: true, remaining: RATE_LIMIT_CONFIG.global.maxRequests, resetIn: 0 };
+    }
+
     const key = generateKey('global');
     const now = Date.now();
     const value = await kv.get<RateLimitRecord>(key);
@@ -125,6 +129,10 @@ export async function checkIpRateLimit(ip: string): Promise<{
 }> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return { allowed: true, remaining: RATE_LIMIT_CONFIG.ip.maxRequests, resetIn: 0 };
+    }
+
     const key = generateKey('ip', ip);
     const now = Date.now();
     const value = await kv.get<RateLimitRecord>(key);
@@ -190,6 +198,10 @@ export async function checkIpRateLimit(ip: string): Promise<{
 export async function resetRateLimit(type: 'global' | 'ip', identifier?: string): Promise<void> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return;
+    }
+
     const key = generateKey(type, identifier);
     await kv.del(key);
     console.log(`[RateLimit] 重置限流: ${key}`);
@@ -208,6 +220,14 @@ export async function getRateLimitStatus(type: 'global' | 'ip', identifier?: str
 }> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return {
+        count: 0,
+        maxRequests: type === 'global' ? RATE_LIMIT_CONFIG.global.maxRequests : RATE_LIMIT_CONFIG.ip.maxRequests,
+        resetIn: 0,
+      };
+    }
+
     const key = generateKey(type, identifier);
     const value = await kv.get<RateLimitRecord>(key);
     const now = Date.now();

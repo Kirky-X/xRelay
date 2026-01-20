@@ -30,7 +30,7 @@ const CONFIG = {
 };
 
 export const config = {
-  runtime: "nodejs18",
+  runtime: "nodejs",
 };
 
 /**

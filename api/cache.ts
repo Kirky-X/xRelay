@@ -52,6 +52,10 @@ export async function getCachedResponse(
 ): Promise<ProxyResponse | null> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return null;
+    }
+
     const key = generateCacheKey(url, method);
     const value = await kv.get<CacheEntry>(key);
 
@@ -85,6 +89,9 @@ export async function cacheResponse(
 ): Promise<void> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return;
+    }
 
     // 只缓存成功的响应
     if (!response.success) {
@@ -112,6 +119,10 @@ export async function cacheResponse(
 export async function clearCache(): Promise<void> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return;
+    }
+
     let count = 0;
 
     // 使用 scanIterator 列出所有缓存键
@@ -136,6 +147,14 @@ export async function getCacheStatus(): Promise<{
 }> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return {
+        size: 0,
+        maxSize: CACHE_CONFIG.maxSize,
+        ttlMs: CACHE_CONFIG.ttl,
+      };
+    }
+
     let count = 0;
 
     for await (const key of kv.scanIterator({ match: 'cache:*' })) {
@@ -163,6 +182,10 @@ export async function getCacheStatus(): Promise<{
 export async function cleanupCache(): Promise<void> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return;
+    }
+
     const now = Date.now();
     let removedCount = 0;
 
@@ -188,6 +211,10 @@ export async function cleanupCache(): Promise<void> {
 export async function invalidateCache(url: string, method: string): Promise<void> {
   try {
     const kv = await getKV();
+    if (!kv) {
+      return;
+    }
+
     const key = generateCacheKey(url, method);
     await kv.del(key);
     console.log(`[Cache] 失效缓存: ${key}`);

@@ -81,7 +81,7 @@ async function sendRequestWithProxy(
     clearTimeout(timeoutId);
 
     // 重置全局 dispatcher
-    setGlobalDispatcher(null);
+    setGlobalDispatcher(null as any);
 
     const headers: Record<string, string> = {};
     response.headers.forEach((value, key) => {
