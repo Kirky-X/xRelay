@@ -259,9 +259,13 @@ header {
 }
 
 .code-cards {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 1.5rem;
+}
+
+.code-cards .code-card:first-child {
+  width: 100%;
 }
 
 .code-card {
