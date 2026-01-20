@@ -1,4 +1,10 @@
 {
   "buildCommand": "echo 'Edge Function - no build required'",
-  "outputDirectory": "."
+  "outputDirectory": ".",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ]
 }
