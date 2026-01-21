@@ -84,7 +84,7 @@ import { ref, onMounted } from 'vue';
 const typingText = ref('');
 const fullText = '安全、快速、免费的代理转发服务';
 const codeExample1 = `# 基本请求示例
-curl -X POST https://xrelay.vercel.app/api \\
+curl -X POST https://x-relay.vercel.app/api \\
   -H "Content-Type: application/json" \\
   -H "x-api-key: YOUR_API_KEY" \\
   -d '{
@@ -93,7 +93,7 @@ curl -X POST https://xrelay.vercel.app/api \\
   }'`;
 
 const codeExample2 = `# 带自定义头部的请求
-curl -X POST https://xrelay.vercel.app/api \\
+curl -X POST https://x-relay.vercel.app/api \\
   -H "Content-Type: application/json" \\
   -H "x-api-key: YOUR_API_KEY" \\
   -d '{
