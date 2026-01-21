@@ -163,37 +163,50 @@ export async function fetchAllProxies(): Promise<ProxyInfo[]> {
 async function fetchFromSource(
   source: (typeof PROXY_SOURCES)[0],
 ): Promise<ProxyInfo[]> {
-  const response = await fetch(source.url, {
-    method: "GET",
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    },
-  });
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
 
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    const response = await fetch(source.url, {
+      method: "GET",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const text = await response.text();
+    const proxyStrings = source.parse(text);
+
+    return proxyStrings
+      .map((proxy) => {
+        const parts = proxy.split(":");
+        if (parts.length < 2) {
+          console.warn(`[ProxyFetcher] 无效的代理格式: ${proxy}`);
+          return null;
+        }
+        const [ip, port] = parts;
+        return {
+          ip,
+          port,
+          source: source.name,
+          timestamp: Date.now(),
+        };
+      })
+      .filter((p): p is ProxyInfo => p !== null);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.warn(`[ProxyFetcher] 获取超时: ${source.name}`);
+    }
+    throw error;
   }
-
-  const text = await response.text();
-  const proxyStrings = source.parse(text);
-
-  return proxyStrings
-    .map((proxy) => {
-      const parts = proxy.split(":");
-      if (parts.length < 2) {
-        console.warn(`[ProxyFetcher] 无效的代理格式: ${proxy}`);
-        return null;
-      }
-      const [ip, port] = parts;
-      return {
-        ip,
-        port,
-        source: source.name,
-        timestamp: Date.now(),
-      };
-    })
-    .filter((p): p is ProxyInfo => p !== null);
 }
 
 /**

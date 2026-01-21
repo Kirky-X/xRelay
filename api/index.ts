@@ -72,9 +72,14 @@ function validateApiKey(request: Request): boolean {
 
 /**
  * 主处理函数
- */
+ */import { initDatabase } from "../lib/database/connection.js";
+
+// ...
 export default async function handler(request: Request): Promise<Response> {
   const startTime = Date.now();
+
+  // 确保数据库已初始化
+  await initDatabase();
 
   // 1. 验证 API Key
   if (!validateApiKey(request)) {

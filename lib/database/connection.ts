@@ -16,6 +16,7 @@ const { Pool } = pg;
 let pool: pg.Pool | null = null;
 let isDatabaseEnabled = false;
 let useVercelPostgres = false;
+let initializationPromise: Promise<boolean> | null = null;
 
 /**
  * 检测是否在 Vercel 环境中运行
@@ -32,54 +33,75 @@ function isVercelEnvironment(): boolean {
  * 初始化数据库连接
  */
 export async function initDatabase(): Promise<boolean> {
-  const databaseUrl = process.env.DATABASE_URL;
-
-  if (!databaseUrl) {
-    console.log("[Database] DATABASE_URL not configured, using memory mode");
-    isDatabaseEnabled = false;
-    return false;
-  }
-
-  // 检测是否在 Vercel 环境
-  useVercelPostgres = isVercelEnvironment();
-
-  if (useVercelPostgres) {
-    console.log("[Database] Using Vercel Postgres serverless client");
-    isDatabaseEnabled = true;
-
-    // 自动运行迁移
-    await autoRunMigration();
-
+  // 如果已经初始化成功，直接返回
+  if (isDatabaseEnabled) {
     return true;
   }
 
-  // 传统环境使用连接池
+  // 如果正在初始化，等待结果
+  if (initializationPromise) {
+    return initializationPromise;
+  }
+
+  initializationPromise = (async () => {
+    const databaseUrl = process.env.DATABASE_URL;
+
+    if (!databaseUrl) {
+      console.log("[Database] DATABASE_URL not configured, using memory mode");
+      isDatabaseEnabled = false;
+      return false;
+    }
+
+    // 检测是否在 Vercel 环境
+    useVercelPostgres = isVercelEnvironment();
+
+    if (useVercelPostgres) {
+      console.log("[Database] Using Vercel Postgres serverless client");
+      isDatabaseEnabled = true;
+
+      // 自动运行迁移
+      await autoRunMigration();
+
+      return true;
+    }
+
+    // 传统环境使用连接池
+    try {
+      pool = new Pool({
+        connectionString: databaseUrl,
+        max: 20, // 最大连接数
+        idleTimeoutMillis: 30000, // 空闲连接超时 30 秒
+        connectionTimeoutMillis: 5000, // 连接超时 5 秒
+      });
+
+      // 测试连接
+      const client = await pool.connect();
+      await client.query("SELECT NOW()");
+      client.release();
+
+      console.log("[Database] Database connection pool established successfully");
+      isDatabaseEnabled = true;
+
+      // 自动运行迁移
+      await autoRunMigration();
+
+      return true;
+    } catch (error) {
+      console.error("[Database] Failed to connect to database:", error);
+      console.log("[Database] Falling back to memory mode");
+      isDatabaseEnabled = false;
+      pool = null;
+      return false;
+    }
+  })();
+
   try {
-    pool = new Pool({
-      connectionString: databaseUrl,
-      max: 20, // 最大连接数
-      idleTimeoutMillis: 30000, // 空闲连接超时 30 秒
-      connectionTimeoutMillis: 5000, // 连接超时 5 秒
-    });
-
-    // 测试连接
-    const client = await pool.connect();
-    await client.query("SELECT NOW()");
-    client.release();
-
-    console.log("[Database] Database connection pool established successfully");
-    isDatabaseEnabled = true;
-
-    // 自动运行迁移
-    await autoRunMigration();
-
-    return true;
-  } catch (error) {
-    console.error("[Database] Failed to connect to database:", error);
-    console.log("[Database] Falling back to memory mode");
-    isDatabaseEnabled = false;
-    pool = null;
-    return false;
+    return await initializationPromise;
+  } finally {
+    // 如果失败，重置 promise 以便重试
+    if (!isDatabaseEnabled) {
+      initializationPromise = null;
+    }
   }
 }
 
@@ -223,6 +245,9 @@ export function getDatabaseStatus(): {
 async function autoRunMigration(): Promise<void> {
   try {
     console.log("[Database] Checking for pending migrations...");
+
+    // 确保 schema 存在
+    await query("CREATE SCHEMA IF NOT EXISTS xrelay");
 
     // 创建迁移记录表（如果不存在）
     await query(`
