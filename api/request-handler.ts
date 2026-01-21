@@ -282,6 +282,7 @@ export async function sendProxyRequest(
 export async function sendRequestWithMultipleProxies(
   request: ProxyRequest,
   proxyCount?: number,
+  useFallback: boolean = true,
 ): Promise<ProxyResponse> {
   // 使用配置的代理数量
   const { DATABASE_CONFIG } = await import("./config.js");
@@ -293,8 +294,17 @@ export async function sendRequestWithMultipleProxies(
   const proxies = await getMultipleProxies(actualProxyCount);
 
   if (proxies.length === 0) {
-    console.log(`[RequestHandler] 没有可用代理，直接使用直连`);
-    // 没有代理，直接直连
+    console.log(`[RequestHandler] 没有可用代理`);
+    if (!useFallback) {
+      return {
+        success: false,
+        error: "没有可用代理且已禁用直连回退",
+        proxyUsed: false,
+        proxyIp: null,
+        proxySuccess: false,
+        fallbackUsed: false,
+      };
+    }
     const result = await sendRequestDirect(request);
     return {
       success: result.success,
@@ -355,6 +365,17 @@ export async function sendRequestWithMultipleProxies(
   }
 
   // 所有代理都失败，回退到直连
+  if (!useFallback) {
+    return {
+      success: false,
+      error: "所有代理失败且已禁用直连回退",
+      proxyUsed: false,
+      proxyIp: null,
+      proxySuccess: false,
+      fallbackUsed: false,
+    };
+  }
+
   console.log(`[RequestHandler] 所有 ${proxies.length} 个代理都失败，回退到直连`);
   const directResult = await sendRequestDirect(request);
 

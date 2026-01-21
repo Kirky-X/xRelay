@@ -76,7 +76,7 @@ Rate Limiting
 ```mermaid
 graph TB
     subgraph "Client Side"
-        A[User / Client App]
+        A[User / Vue.js Frontend]
     end
 
     subgraph "Vercel Edge Network"
@@ -84,24 +84,39 @@ graph TB
         C[Rate Limiter]
         D[Request Validator]
         E[Proxy Logic Controller]
+        F[Cache Layer]
+    end
+
+    subgraph "Data Layer"
+        G[PostgreSQL Database]
+        H[Redis / Vercel KV]
     end
 
     subgraph "External Resources"
-        F[Free Proxy Pool]
-        G[Target Server]
+        I[Free Proxy Pool]
+        J[Target Server]
     end
 
-    A -- POST Request --> B
+    A -- API Request --> B
     B --> C
     C -- Allowed --> D
     D -- Valid --> E
 
-    E -- 1. Try Proxy --> F
-    F -- Forward --> G
+    E -- Cache Check --> F
+    F -- Cache Hit --> E
+    F -- Cache Miss --> E
 
-    E -- 2. Fallback (If Proxy Fails) --> G
+    E -- Proxy Stats --> G
+    E -- Rate Limit Data --> H
+    F -- Cache Storage --> H
 
-    G -- Response --> E
+    E -- 1. Try Proxy --> I
+    I -- Forward --> J
+
+    E -- 2. Fallback (If Proxy Fails) --> J
+
+    J -- Response --> E
+    E -- Cache Response --> F
     E -- Response --> A
 
     style A fill:#e1f5ff
@@ -109,8 +124,11 @@ graph TB
     style C fill:#81d4fa
     style D fill:#81d4fa
     style E fill:#4fc3f7
-    style F fill:#ef9a9a
-    style G fill:#a5d6a7
+    style F fill:#fff3e0
+    style G fill:#e8f5e8
+    style H fill:#fce4ec
+    style I fill:#ef9a9a
+    style J fill:#a5d6a7
 ```
 
 ---
@@ -122,25 +140,53 @@ graph TB
 The entry point for all requests. It runs on Vercel's Edge Runtime, ensuring low latency and high availability.
 
 - **Responsibilities**:
-  - Request parsing
+  - Request parsing and validation
+  - API Key authentication
+  - Rate limiting checks
   - Response formatting
   - Error handling
 
-### 2️⃣ Proxy Manager
+### 2️⃣ Database Layer (`lib/database/`)
+
+Manages proxy data persistence and state across multiple deployment instances.
+
+- **Components**:
+  - `connection.ts`: Database connection management
+  - `available-proxies-dao.ts`: Active proxy operations
+  - `deprecated-proxies-dao.ts`: Failed proxy tracking
+  - `cleanup.ts`: Automated maintenance tasks
+
+### 3️⃣ Cache Layer (`api/cache.ts`)
+
+Provides response caching to reduce redundant requests and improve performance.
+
+- **Storage**: Redis or Vercel KV
+- **TTL**: 5 minutes (configurable)
+- **Strategy**: Cache-aside pattern
+
+### 4️⃣ Proxy Manager
 
 Manages the lifecycle of proxy selection and usage.
 
 - **Strategy**: Fetches proxies from a curated list of free proxy providers.
 - **Validation**: Checks if a proxy is alive before using it (optimistic or pre-check).
-- **Rotation**: Selects a random proxy for each request to maximize anonymity.
+- **Rotation**: Selects multiple proxies for each request to maximize success rate.
 
-### 3️⃣ Fallback Mechanism
+### 5️⃣ Security Layer (`api/security.ts`)
+
+Ensures secure operation and prevents abuse.
+
+- **SSRF Protection**: Blocks internal network access
+- **IP Validation**: Validates client IP addresses
+- **Header Sanitization**: Removes sensitive headers
+
+### 6️⃣ Fallback Mechanism
 
 Ensures high success rates.
 
 - **Trigger**: Network timeout, connection refused, or HTTP 5xx from proxy.
 - **Action**: Retries the request directly from the Vercel Edge node.
-- **Transparency**: Returns a header indicating if fallback was used (`X-Fallback-Used`).
+- **Transparency**: Returns metadata indicating if fallback was used.
 
 ---
 
@@ -180,8 +226,13 @@ Ensures high success rates.
 
 - **Runtime**: Node.js / Vercel Edge Runtime
 - **Language**: TypeScript
+- **Frontend Framework**: Vue.js 3
+- **Build Tool**: Vite
+- **Database**: PostgreSQL (with @vercel/postgres)
+- **Cache**: Redis / Vercel KV
+- **HTTP Client**: Undici
 - **Testing**: Vitest
-- **Deployment**: Vercel
+- **Deployment**: Vercel / Docker
 
 ---
 

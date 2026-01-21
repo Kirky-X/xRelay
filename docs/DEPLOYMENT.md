@@ -32,6 +32,17 @@ KV_REST_API_TOKEN=your_token
 ENABLE_API_KEY=true
 API_KEYS=your-secret-key-1,your-secret-key-2
 API_KEY_HEADER=x-api-key
+
+# 安全配置（可选）
+NODE_ENV=production
+
+# 功能开关（可选）
+# ENABLE_CACHE=true          # 默认: true
+# ENABLE_RATE_LIMIT=true     # 默认: true  
+# ENABLE_FALLBACK=true       # 默认: true
+
+# 日志配置（可选）
+# ENABLE_VERBOSE_LOGGING=false  # 默认: false（生产环境）
 ```
 
 ### 3. 部署
@@ -43,7 +54,7 @@ API_KEY_HEADER=x-api-key
 ### 1. 构建镜像
 
 ```bash
-docker build -t xrelay-app .
+docker build -f docker/Dockerfile -t xrelay-app .
 ```
 
 ### 2. 运行容器

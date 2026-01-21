@@ -1,5 +1,5 @@
 {
-  "name": "vercel-proxy-shield",
+  "name": "xrelay",
   "version": "1.0.0",
   "description": "Vercel Edge Function proxy with free proxy pool and fallback",
   "main": "api/index.ts",
@@ -8,7 +8,7 @@
     "dev": "vite",
     "dev:api": "node server.js",
     "build:frontend": "vite build",
-    "build:api": "tsc --project tsconfig.json --outDir dist",
+    "build:api": "tsc --project config/tsconfig.json --outDir dist",
     "build": "npm run build:frontend && npm run build:api",
     "preview": "vite preview",
     "deploy": "vercel --prod",

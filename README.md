@@ -160,25 +160,47 @@ DATABASE_URL=postgresql://postgres:password@localhost:5432/xrelay
 ## 项目结构
 
 ```
-vercel-proxy-shield/
-├── api/
-│   ├── database/         # 数据库模块
-│   │   ├── connection.ts        # 数据库连接管理
+xRelay/
+├── api/                       # Vercel Edge Functions
+│   ├── __tests__/            # API 测试
+│   ├── index.ts              # Edge Function 入口
+│   ├── config.ts             # 配置管理
+│   ├── security.ts           # 安全验证
+│   ├── proxy-fetcher.ts      # 代理获取
+│   ├── proxy-tester.ts       # 代理测试
+│   ├── proxy-manager.ts      # 代理池管理
+│   ├── request-handler.ts    # 请求转发
+│   ├── rate-limiter.ts       # 请求限流
+│   └── cache.ts              # 响应缓存
+├── lib/                       # 共享库
+│   ├── database/             # 数据库模块
+│   │   ├── __tests__/        # 数据库测试
+│   │   ├── connection.ts     # 数据库连接管理
 │   │   ├── available-proxies-dao.ts  # 可用代理 DAO
 │   │   ├── deprecated-proxies-dao.ts # 废弃代理 DAO
-│   │   ├── cleanup.ts            # 自动清理任务
-│   │   └── schema.sql            # 数据库 Schema
-│   ├── index.ts          # Edge Function 入口
-│   ├── proxy-fetcher.ts  # 代理获取
-│   ├── proxy-tester.ts   # 代理测试
-│   ├── proxy-manager.ts  # 代理池管理
-│   ├── request-handler.ts # 请求转发
-│   ├── rate-limiter.ts   # 请求限流
-│   ├── cache.ts          # 响应缓存
-│   └── config.ts         # 配置
-├── vercel.json           # Vercel 配置
-├── package.json
-└── tsconfig.json
+│   │   ├── cleanup.ts        # 自动清理任务
+│   │   └── index.ts          # 数据库模块入口
+│   └── ...                   # 其他共享模块
+├── src/                       # 前端源码
+│   ├── components/           # Vue 组件
+│   ├── views/               # 页面视图
+│   ├── assets/              # 静态资源
+│   └── main.ts              # 前端入口
+├── docker/                    # Docker 配置
+│   ├── Dockerfile           # 容器镜像构建
+│   ├── docker-compose.yml   # 生产环境编排
+│   └── docker-compose.dev.yml # 开发环境编排
+├── docs/                      # 项目文档
+│   ├── ARCHITECTURE.md      # 架构设计文档
+│   ├── DEPLOYMENT.md        # 部署指南
+│   └── DOCKER.md            # Docker 部署指南
+├── public/                    # 公共资源
+├── tests/                     # 测试文件
+├── vercel.json               # Vercel 配置
+├── package.json              # 依赖管理
+├── tsconfig.json             # TypeScript 配置
+├── vite.config.ts            # Vite 构建配置
+└── server.js                 # 本地开发服务器
 ```
 
 ## 代理来源

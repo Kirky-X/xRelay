@@ -75,9 +75,9 @@ export const CACHE_CONFIG = {
 
 // 功能开关
 export const FEATURES = {
-  enableCache: true,
-  enableRateLimit: true,
-  enableFallback: true,
+  enableCache: process.env.ENABLE_CACHE !== "false",
+  enableRateLimit: process.env.ENABLE_RATE_LIMIT !== "false",
+  enableFallback: process.env.ENABLE_FALLBACK !== "false",
   enableApiKey: process.env.ENABLE_API_KEY === "true",
 };
 

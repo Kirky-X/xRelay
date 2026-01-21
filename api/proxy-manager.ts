@@ -20,7 +20,7 @@ import {
   initDatabase,
   isDatabaseReady,
   getPool,
-} from "../lib/database/connection.js";
+} from "./database/connection.js";
 import {
   upsertProxy,
   getAllProxies,
@@ -31,12 +31,12 @@ import {
   batchInsertProxies,
   getWeightedProxies,
   type AvailableProxy,
-} from "../lib/database/available-proxies-dao.js";
+} from "./database/available-proxies-dao.js";
 import {
   insertDeprecatedProxy,
   isProxyDeprecated,
   getAllDeprecatedProxies,
-} from "../lib/database/deprecated-proxies-dao.js";
+} from "./database/deprecated-proxies-dao.js";
 
 // 代理池状态（内存模式）
 interface ProxyPoolState {

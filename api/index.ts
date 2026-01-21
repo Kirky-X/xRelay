@@ -8,12 +8,13 @@
  * 处理所有代理请求
  */
 
-import { SECURITY_CONFIG, API_KEY_CONFIG } from "./config.js";
+import { SECURITY_CONFIG, API_KEY_CONFIG, FEATURES } from "./config.js";
 import { validateUrl, isValidPublicIp } from "./security.js";
 import { checkGlobalRateLimit, checkIpRateLimit } from "./rate-limiter.js";
 import { getCachedResponse, cacheResponse } from "./cache.js";
 import { sendRequestWithMultipleProxies } from "./request-handler.js";
 import type { ProxyRequest } from "./request-handler.js";
+import { initDatabase } from "./database/connection.js";
 
 // 类型定义
 interface RequestBody {
@@ -72,9 +73,7 @@ function validateApiKey(request: Request): boolean {
 
 /**
  * 主处理函数
- */import { initDatabase } from "../lib/database/connection.js";
-
-// ...
+ */
 export default async function handler(request: Request): Promise<Response> {
   const startTime = Date.now();
 
@@ -103,37 +102,41 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   // 3. 检查限流（全局）
-  const globalLimit = await checkGlobalRateLimit();
-  if (!globalLimit.allowed) {
-    if (SECURITY_CONFIG.enableVerboseLogging) {
-      console.log(`[Main] 全局限流触发`);
+  if (FEATURES.enableRateLimit) {
+    const globalLimit = await checkGlobalRateLimit();
+    if (!globalLimit.allowed) {
+      if (SECURITY_CONFIG.enableVerboseLogging) {
+        console.log(`[Main] 全局限流触发`);
+      }
+      return createJsonResponse(
+        429,
+        {
+          error: "Rate limit exceeded. Please try again later.",
+          code: "RATE_LIMIT_GLOBAL",
+          retryAfter: Math.ceil(globalLimit.resetIn / 1000),
+        },
+        request,
+      );
     }
-    return createJsonResponse(
-      429,
-      {
-        error: "Rate limit exceeded. Please try again later.",
-        code: "RATE_LIMIT_GLOBAL",
-        retryAfter: Math.ceil(globalLimit.resetIn / 1000),
-      },
-      request,
-    );
   }
 
   // 4. 检查限流（IP 级别）
-  const ipLimit = await checkIpRateLimit(clientIp);
-  if (!ipLimit.allowed) {
-    if (SECURITY_CONFIG.enableVerboseLogging) {
-      console.log(`[Main] IP限流触发`);
+  if (FEATURES.enableRateLimit) {
+    const ipLimit = await checkIpRateLimit(clientIp);
+    if (!ipLimit.allowed) {
+      if (SECURITY_CONFIG.enableVerboseLogging) {
+        console.log(`[Main] IP限流触发`);
+      }
+      return createJsonResponse(
+        429,
+        {
+          error: "Rate limit exceeded for your IP.",
+          code: "RATE_LIMIT_IP",
+          retryAfter: Math.ceil(ipLimit.resetIn / 1000),
+        },
+        request,
+      );
     }
-    return createJsonResponse(
-      429,
-      {
-        error: "Rate limit exceeded for your IP.",
-        code: "RATE_LIMIT_IP",
-        retryAfter: Math.ceil(ipLimit.resetIn / 1000),
-      },
-      request,
-    );
   }
 
   // 5. 处理 OPTIONS 请求（CORS 预检）
@@ -235,7 +238,7 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   // 10. 检查缓存
-  let useCache = body.useCache !== false; // 默认启用缓存
+  let useCache = FEATURES.enableCache && body.useCache !== false;
   if (useCache) {
     const cached = await getCachedResponse(body.url, body.method || "GET");
     if (cached) {
@@ -255,7 +258,11 @@ export default async function handler(request: Request): Promise<Response> {
       body: body.body,
     };
 
-    const response = await sendRequestWithMultipleProxies(proxyRequest, CONFIG.maxProxyAttempts);
+    const response = await sendRequestWithMultipleProxies(
+      proxyRequest,
+      CONFIG.maxProxyAttempts,
+      FEATURES.enableFallback,
+    );
 
     // 缓存成功的响应
     if (response.success && useCache) {

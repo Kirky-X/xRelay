@@ -11,10 +11,10 @@
 
 import type { ProxyInfo } from "./proxy-fetcher.js";
 import { PROXY_TEST_CONFIG, DATABASE_CONFIG } from "./config.js";
-import { isDatabaseReady } from "../lib/database/connection.js";
+import { isDatabaseReady } from "./database/connection.js";
 import {
   insertDeprecatedProxy,
-} from "../lib/database/deprecated-proxies-dao.js";
+} from "./database/deprecated-proxies-dao.js";
 
 // 代理黑名单（失败的代理，内存模式）
 const failedProxyBlacklist = new Map<string, number>();
