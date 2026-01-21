@@ -5,12 +5,12 @@
   "main": "api/index.ts",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --config config/vite.config.ts",
     "dev:api": "node server.js",
-    "build:frontend": "vite build",
+    "build:frontend": "vite build --config config/vite.config.ts",
     "build:api": "tsc --project config/tsconfig.json --outDir dist",
     "build": "npm run build:frontend && npm run build:api",
-    "preview": "vite preview",
+    "preview": "vite preview --config config/vite.config.ts",
     "deploy": "vercel --prod",
     "test": "vitest run",
     "test:watch": "vitest"
