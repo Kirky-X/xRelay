@@ -9,6 +9,7 @@
  */
 
 import { runCleanup } from "../database/cleanup.js";
+import { isProduction } from "../config.js";
 
 export const config = {
   runtime: "nodejs",
@@ -16,22 +17,46 @@ export const config = {
 
 /**
  * 验证 Cron 请求授权
+ * 安全策略：
+ * 1. 生产环境必须配置 CRON_SECRET
+ * 2. 非生产环境允许 Vercel Cron header
  */
-function validateCronAuth(request: Request): boolean {
-  // Vercel Cron Jobs 会自动添加这个 header
+function validateCronAuth(request: Request): { valid: boolean; error?: string } {
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
+  const isVercelCron = request.headers.get("x-vercel-cron") === "true";
 
-  // 如果没有配置 CRON_SECRET，则只允许来自 Vercel 内部的请求
-  if (!cronSecret) {
-    // Vercel Cron Jobs 会设置这个 header
-    const isVercelCron = request.headers.get("x-vercel-cron") === "true";
-    return isVercelCron;
+  // 生产环境必须配置 CRON_SECRET
+  if (isProduction()) {
+    if (!cronSecret) {
+      console.error("[Cron] CRON_SECRET must be configured in production");
+      return { valid: false, error: "Server misconfigured: CRON_SECRET not set" };
+    }
+    
+    // 验证 Authorization header
+    const expectedAuth = `Bearer ${cronSecret}`;
+    if (authHeader !== expectedAuth) {
+      return { valid: false, error: "Invalid authorization" };
+    }
+    
+    return { valid: true };
   }
 
-  // 如果配置了 CRON_SECRET，则验证 Authorization header
-  const expectedAuth = `Bearer ${cronSecret}`;
-  return authHeader === expectedAuth;
+  // 非生产环境：允许 CRON_SECRET 或 Vercel Cron header
+  if (cronSecret) {
+    const expectedAuth = `Bearer ${cronSecret}`;
+    if (authHeader !== expectedAuth) {
+      return { valid: false, error: "Invalid authorization" };
+    }
+    return { valid: true };
+  }
+
+  // 非生产环境且无 CRON_SECRET：信任 Vercel Cron header
+  if (isVercelCron) {
+    return { valid: true };
+  }
+
+  return { valid: false, error: "Missing authentication" };
 }
 
 /**
@@ -47,9 +72,10 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   // 验证授权
-  if (!validateCronAuth(request)) {
-    console.log("[Cron] Unauthorized request");
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+  const authResult = validateCronAuth(request);
+  if (!authResult.valid) {
+    console.log("[Cron] Unauthorized request:", authResult.error);
+    return new Response(JSON.stringify({ error: authResult.error || "Unauthorized" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
     });
