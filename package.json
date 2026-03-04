@@ -21,7 +21,7 @@
     "@vercel/postgres": "^0.10.0",
     "@vitejs/plugin-vue": "^6.0.3",
     "diff": "^8.0.3",
-    "esbuild": "^0.24.2",
+    "esbuild": "^0.25.0",
     "path-to-regexp": "^6.3.0",
     "pg": "^8.13.1",
     "undici": "^6.22.1",
@@ -42,8 +42,10 @@
     "path-to-regexp": "^6.3.0",
     "tar": "^7.5.3",
     "undici": "^6.22.1",
-    "esbuild": {
-      ".": "^0.24.2"
-    }
+    "esbuild": "^0.25.0",
+    "minimatch": "^3.1.4",
+    "semver": "^7.5.2",
+    "debug": "^4.3.1",
+    "ajv": "^8.18.0"
   }
 }
