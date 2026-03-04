@@ -106,7 +106,8 @@ export async function testProxiesInBatch(
   console.log(`[ProxyTester] 开始测试 ${proxies.length} 个代理...`);
 
   // 并行测试，但限制并发数
-  const results: Array<{ success: boolean; proxy: ProxyInfo }> = [];
+  // 直接收集带延迟的结果，避免重复测试
+  const results: Array<{ success: boolean; proxy: ProxyInfo; latency?: number }> = [];
 
   for (let i = 0; i < proxies.length; i += maxWorkers) {
     const batch = proxies.slice(i, i + maxWorkers);
@@ -116,7 +117,7 @@ export async function testProxiesInBatch(
 
     for (const result of batchResults) {
       if (result.success) {
-        results.push({ success: true, proxy: result.proxy });
+        results.push({ success: true, proxy: result.proxy, latency: result.latency });
       }
     }
 
@@ -129,23 +130,14 @@ export async function testProxiesInBatch(
     }
   }
 
-  // 按延迟排序（最快的在前）
-  const sortedResults = await Promise.all(
-    results.map(async (r) => {
-      const testResult = await testProxy(r.proxy);
-      return testResult;
-    }),
-  );
-
-  sortedResults.sort(
-    (a, b) => (a.latency || Infinity) - (b.latency || Infinity),
-  );
+  // 按延迟排序（最快的在前）- 直接使用已有延迟信息，不重复测试
+  results.sort((a, b) => (a.latency || Infinity) - (b.latency || Infinity));
 
   console.log(
-    `[ProxyTester] 测试完成，找到 ${sortedResults.length} 个可用代理`,
+    `[ProxyTester] 测试完成，找到 ${results.length} 个可用代理`,
   );
 
-  return sortedResults.map((r) => r.proxy);
+  return results.map((r) => r.proxy);
 }
 
 /**
