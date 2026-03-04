@@ -114,44 +114,24 @@ function calculateWeight(proxy: AvailableProxy): number {
 
 /**
  * 根据权重获取 N 个代理（加权随机选择）
+ * 使用数据库层的加权随机算法，复杂度 O(n log n)
+ * 算法原理：-LOG(RANDOM()) / weight 产生指数分布，权重越高越可能排在前面
  */
 export async function getWeightedProxies(count: number): Promise<AvailableProxy[]> {
-  const proxies = await getProxiesWithWeight();
+  // 使用 SQL 的加权随机排序
+  // 权重计算：(success_count + 1) / (success_count + failure_count + 1)
+  // 使用 GREATEST 避免除零，使用 -LOG(RANDOM()) 生成指数分布
+  const text = `
+    SELECT * FROM xrelay.available_proxies
+    ORDER BY -LOG(RANDOM()) / GREATEST(
+      (success_count + 1.0) / (success_count + failure_count + 2.0),
+      0.01
+    )
+    LIMIT $1
+  `;
 
-  if (proxies.length === 0) {
-    return [];
-  }
-
-  // 计算总权重
-  const totalWeight = proxies.reduce((sum, p) => sum + p.weight, 0);
-
-  // 如果所有权重都是 0，则随机选择
-  if (totalWeight === 0) {
-    const shuffled = [...proxies].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, Math.min(count, shuffled.length));
-  }
-
-  // 加权随机选择
-  const selected: AvailableProxy[] = [];
-  const remaining = [...proxies];
-
-  for (let i = 0; i < count && remaining.length > 0; i++) {
-    let random = Math.random() * totalWeight;
-    let index = 0;
-
-    for (let j = 0; j < remaining.length; j++) {
-      random -= remaining[j].weight;
-      if (random <= 0) {
-        index = j;
-        break;
-      }
-    }
-
-    selected.push(remaining[index]);
-    remaining.splice(index, 1);
-  }
-
-  return selected;
+  const result = await query(text, [count]);
+  return result.rows;
 }
 
 /**
