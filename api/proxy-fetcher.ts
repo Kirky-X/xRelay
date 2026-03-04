@@ -9,7 +9,7 @@
  */
 
 import { PROXY_CONFIG, REQUEST_TIMEOUT_CONFIG } from "./config.js";
-import { validateProxyInfo } from "./security.js";
+import { validateProxyInfo, validateProxySource } from "./security.js";
 
 // 代理源配置
 const PROXY_SOURCES = [
@@ -202,10 +202,14 @@ async function fetchFromSource(
           return null;
         }
         
+        // 验证来源
+        const sourceValidation = validateProxySource(source.name);
+        const validatedSource = sourceValidation.valid ? sourceValidation.source! : 'unknown';
+        
         return {
           ip,
           port,
-          source: source.name,
+          source: validatedSource,
           timestamp: Date.now(),
         };
       })

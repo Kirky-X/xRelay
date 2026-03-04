@@ -372,3 +372,27 @@ export function validateProxyInfo(ip: string, port: string | number): { valid: b
   
   return { valid: true };
 }
+
+/**
+ * 验证代理来源字符串
+ * @param source 来源字符串
+ * @returns 验证结果
+ */
+export function validateProxySource(source: string | undefined | null): { valid: boolean; source?: string; error?: string } {
+  if (!source) {
+    // 来源可以为空，使用默认值
+    return { valid: true, source: 'unknown' };
+  }
+  
+  // 长度限制
+  if (source.length > 50) {
+    return { valid: false, error: 'Source string too long (max 50 characters)' };
+  }
+  
+  // 只允许安全字符：字母、数字、下划线、连字符
+  if (!source.match(/^[a-zA-Z0-9_-]+$/)) {
+    return { valid: false, error: 'Source contains invalid characters (only a-zA-Z0-9_- allowed)' };
+  }
+  
+  return { valid: true, source };
+}
