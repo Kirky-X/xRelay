@@ -61,25 +61,37 @@ export async function upsertProxy(proxy: Omit<AvailableProxy, "id" | "created_at
 
 /**
  * 批量插入代理
+ * 限制每次插入数量以避免超出 PostgreSQL 参数限制
  */
+const MAX_BATCH_INSERT_SIZE = 1000; // 每批最多 1000 条
+
 export async function batchInsertProxies(proxies: Omit<AvailableProxy, "id" | "created_at" | "updated_at">[]): Promise<number> {
   if (proxies.length === 0) {
     return 0;
   }
 
-  const text = `
-    INSERT INTO xrelay.available_proxies (ip, port, source, failure_count, success_count)
-    VALUES ${proxies.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4}, 0)`).join(", ")}
-    ON CONFLICT (ip, port) DO NOTHING
-  `;
+  let totalInserted = 0;
+  
+  // 分批处理以避免超出参数限制
+  for (let i = 0; i < proxies.length; i += MAX_BATCH_INSERT_SIZE) {
+    const batch = proxies.slice(i, i + MAX_BATCH_INSERT_SIZE);
+    
+    const text = `
+      INSERT INTO xrelay.available_proxies (ip, port, source, failure_count, success_count)
+      VALUES ${batch.map((_, j) => `($${j * 4 + 1}, $${j * 4 + 2}, $${j * 4 + 3}, $${j * 4 + 4}, 0)`).join(", ")}
+      ON CONFLICT (ip, port) DO NOTHING
+    `;
 
-  const values: (string | number)[] = [];
-  for (const proxy of proxies) {
-    values.push(proxy.ip, proxy.port, proxy.source, proxy.failure_count);
+    const values: (string | number)[] = [];
+    for (const proxy of batch) {
+      values.push(proxy.ip, proxy.port, proxy.source, proxy.failure_count);
+    }
+
+    const result = await query(text, values);
+    totalInserted += result.rowCount || 0;
   }
 
-  const result = await query(text, values);
-  return result.rowCount || 0;
+  return totalInserted;
 }
 
 /**
