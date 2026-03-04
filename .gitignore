@@ -37,5 +37,8 @@ yarn-error.log*
 .iflow/
 .openspec/
 
+# Worktrees
+.worktrees/
+
 # Docker
 docker-compose.override.yml
