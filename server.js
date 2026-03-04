@@ -104,6 +104,6 @@ server.listen(PORT, () => {
   console.log(`\n测试命令:`);
   console.log(`curl -X POST http://localhost:${PORT}/api \\`);
   console.log(`  -H "Content-Type: application/json" \\`);
-  console.log(`  -H "x-api-key: 2857d873479991ecf5fe331ace168fe7845c5b79ac2ed3f0edff44ac617cbe6f" \\`);
+  console.log(`  -H "x-api-key: YOUR_API_KEY" \\`);
   console.log(`  -d '{"url": "https://httpbin.org/ip", "method": "GET"}'\n`);
 });
