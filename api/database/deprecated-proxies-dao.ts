@@ -76,12 +76,23 @@ export async function getDeprecatedProxyCount(): Promise<number> {
 }
 
 /**
+ * 验证 days 参数是否有效
+ */
+function validateDaysParameter(days: number): void {
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    throw new Error(`Invalid days parameter: must be integer between 1 and 365, got ${days}`);
+  }
+}
+
+/**
  * 获取过期废弃代理
  */
 export async function getExpiredDeprecatedProxies(days: number = 30): Promise<DeprecatedProxy[]> {
+  validateDaysParameter(days);
+  const safeDays = Math.floor(days);
   const text = `
     SELECT * FROM xrelay.deprecated_proxies
-    WHERE deprecated_at < NOW() - INTERVAL '${days} days'
+    WHERE deprecated_at < NOW() - INTERVAL '${safeDays} days'
     ORDER BY deprecated_at ASC
   `;
   const result = await query(text);
@@ -92,9 +103,11 @@ export async function getExpiredDeprecatedProxies(days: number = 30): Promise<De
  * 删除过期废弃代理
  */
 export async function deleteExpiredDeprecatedProxies(days: number = 30): Promise<number> {
+  validateDaysParameter(days);
+  const safeDays = Math.floor(days);
   const text = `
     DELETE FROM xrelay.deprecated_proxies
-    WHERE deprecated_at < NOW() - INTERVAL '${days} days'
+    WHERE deprecated_at < NOW() - INTERVAL '${safeDays} days'
   `;
   const result = await query(text);
   return result.rowCount || 0;
