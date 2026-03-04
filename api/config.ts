@@ -53,6 +53,12 @@ export const DATABASE_CONFIG = {
   cleanupInterval: 24 * 60 * 60 * 1000, // 24小时
   // 每次请求选取的代理数量
   proxiesPerRequest: 5,
+  // 连接池配置
+  pool: {
+    maxConnections: 20,
+    idleTimeoutMillis: 30000, // 30秒
+    connectionTimeoutMillis: 5000, // 5秒
+  },
 };
 
 // 限流配置

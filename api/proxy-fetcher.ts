@@ -8,7 +8,7 @@
  * 从多个免费代理源获取代理 IP
  */
 
-import { PROXY_CONFIG } from "./config.js";
+import { PROXY_CONFIG, REQUEST_TIMEOUT_CONFIG } from "./config.js";
 
 // 代理源配置
 const PROXY_SOURCES = [
@@ -165,7 +165,7 @@ async function fetchFromSource(
 ): Promise<ProxyInfo[]> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_CONFIG.direct);
 
     const response = await fetch(source.url, {
       method: "GET",

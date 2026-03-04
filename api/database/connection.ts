@@ -9,6 +9,7 @@
  */
 
 import pg from "pg";
+import { DATABASE_CONFIG } from "../config.js";
 
 const { Pool } = pg;
 
@@ -69,9 +70,9 @@ export async function initDatabase(): Promise<boolean> {
     try {
       pool = new Pool({
         connectionString: databaseUrl,
-        max: 20, // 最大连接数
-        idleTimeoutMillis: 30000, // 空闲连接超时 30 秒
-        connectionTimeoutMillis: 5000, // 连接超时 5 秒
+        max: DATABASE_CONFIG.pool.maxConnections,
+        idleTimeoutMillis: DATABASE_CONFIG.pool.idleTimeoutMillis,
+        connectionTimeoutMillis: DATABASE_CONFIG.pool.connectionTimeoutMillis,
       });
 
       // 测试连接
