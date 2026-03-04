@@ -39,6 +39,53 @@ export interface ProxyResponse {
 }
 
 /**
+ * 危险 Headers 列表（大小写不敏感）
+ * 这些 headers 可能被用于请求走私、注入攻击或绕过安全控制
+ */
+const DANGEROUS_HEADERS = new Set([
+  // 请求走私相关
+  'host',
+  'content-length',
+  'transfer-encoding',
+  'connection',
+  'keep-alive',
+  'upgrade',
+  // 代理相关
+  'proxy-authorization',
+  'proxy-connection',
+  'proxy-authenticate',
+  // CDN/转发相关
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+  'x-client-ip',
+  'via',
+  // 认证相关（用户应自行管理）
+  'authorization',
+  'cookie',
+  'set-cookie',
+]);
+
+/**
+ * 过滤危险 Headers（防止 Headers 注入和请求走私）
+ */
+export function filterDangerousHeaders(headers: Record<string, string>): Record<string, string> {
+  const filtered: Record<string, string> = {};
+  
+  for (const [key, value] of Object.entries(headers)) {
+    const lowerKey = key.toLowerCase();
+    if (!DANGEROUS_HEADERS.has(lowerKey)) {
+      filtered[key] = value;
+    } else {
+      console.log(`[RequestHandler] 过滤危险 header: ${key}`);
+    }
+  }
+  
+  return filtered;
+}
+
+/**
  * 通过代理发送请求
  */
 async function sendRequestWithProxy(
@@ -66,10 +113,13 @@ async function sendRequestWithProxy(
       REQUEST_TIMEOUT_CONFIG.proxy,
     );
 
+    // 过滤危险 headers
+    const filteredHeaders = request.headers ? filterDangerousHeaders(request.headers) : {};
+
     // 构建 undici 请求选项
     const undiciOptions = {
       method: request.method as any,
-      headers: request.headers as any,
+      headers: filteredHeaders as any,
       dispatcher,
       signal: controller.signal as any,
       body: request.body,
@@ -141,9 +191,12 @@ async function sendRequestDirect(request: ProxyRequest): Promise<{
       REQUEST_TIMEOUT_CONFIG.direct,
     );
 
+    // 过滤危险 headers
+    const filteredHeaders = request.headers ? filterDangerousHeaders(request.headers) : {};
+
     const fetchOptions: RequestInit = {
       method: request.method,
-      headers: request.headers || {},
+      headers: filteredHeaders,
       signal: controller.signal,
     };
 
