@@ -8,7 +8,7 @@
  * 处理所有代理请求
  */
 
-import { SECURITY_CONFIG, API_KEY_CONFIG, FEATURES } from "./config.js";
+import { SECURITY_CONFIG, API_KEY_CONFIG, FEATURES, validateProductionConfig } from "./config.js";
 import { validateUrl, isValidPublicIp } from "./security.js";
 import { checkGlobalRateLimit, checkIpRateLimit } from "./rate-limiter.js";
 import { getCachedResponse, cacheResponse } from "./cache.js";
@@ -76,6 +76,20 @@ function validateApiKey(request: Request): boolean {
  */
 export default async function handler(request: Request): Promise<Response> {
   const startTime = Date.now();
+
+  // 0. 验证生产环境配置
+  const configValidation = validateProductionConfig();
+  if (!configValidation.valid) {
+    console.error("[Main] Invalid production config:", configValidation.errors);
+    return new Response(JSON.stringify({
+      error: "Server misconfigured",
+      code: "CONFIG_ERROR",
+      details: configValidation.errors,
+    }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   // 确保数据库已初始化
   await initDatabase();

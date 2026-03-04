@@ -121,7 +121,44 @@ export const SECURITY_CONFIG = {
     "fe80::/10", // IPv6 Link-local
   ],
   // 请求大小限制（字节）
-  maxRequestSize: 10 * 1024 * 1024, // 10MB
+  maxRequestSize: 100 * 1024, // 100KB (was 10MB)
   // 是否启用详细日志（生产环境应设为 false）
   enableVerboseLogging: process.env.NODE_ENV !== "production",
 };
+
+/**
+ * 检查是否为生产环境
+ */
+export function isProduction(): boolean {
+  return process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
+}
+
+/**
+ * 验证生产环境配置
+ * @returns 验证结果，包含是否有效和错误列表
+ */
+export function validateProductionConfig(): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  
+  if (isProduction()) {
+    // 生产环境必须配置 API Key
+    if (!process.env.API_KEYS || process.env.API_KEYS.trim() === "") {
+      errors.push("API_KEYS environment variable must be set in production");
+    }
+    
+    // 生产环境必须启用 API Key 验证
+    if (process.env.ENABLE_API_KEY !== "true") {
+      errors.push("ENABLE_API_KEY must be set to 'true' in production");
+    }
+    
+    // 生产环境应关闭详细日志
+    if (process.env.ENABLE_VERBOSE_LOGGING === "true") {
+      console.warn("[Config] WARNING: Verbose logging is enabled in production");
+    }
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
