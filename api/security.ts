@@ -311,3 +311,64 @@ export async function validateDnsResolution(hostname: string): Promise<{ valid: 
 export function clearDnsCache(): void {
   dnsCache.clear();
 }
+
+/**
+ * 验证代理端口是否有效
+ * @param port 端口号（字符串或数字）
+ * @returns 验证结果
+ */
+export function validateProxyPort(port: string | number): { valid: boolean; port?: number; error?: string } {
+  const portNum = typeof port === 'string' ? parseInt(port, 10) : port;
+  
+  if (isNaN(portNum)) {
+    return { valid: false, error: 'Port is not a valid number' };
+  }
+  
+  if (!Number.isInteger(portNum)) {
+    return { valid: false, error: 'Port must be an integer' };
+  }
+  
+  if (portNum < 1 || portNum > 65535) {
+    return { valid: false, error: `Port ${portNum} is out of valid range (1-65535)` };
+  }
+  
+  // 警告：特权端口通常不应作为代理端口
+  if (portNum < 1024) {
+    console.warn(`[Security] Warning: Port ${portNum} is a privileged port, which is unusual for proxy services`);
+  }
+  
+  return { valid: true, port: portNum };
+}
+
+/**
+ * 验证代理信息是否有效
+ * @param ip IP 地址
+ * @param port 端口号
+ * @returns 验证结果
+ */
+export function validateProxyInfo(ip: string, port: string | number): { valid: boolean; error?: string } {
+  // 验证端口
+  const portResult = validateProxyPort(port);
+  if (!portResult.valid) {
+    return portResult;
+  }
+  
+  // 验证 IP 格式
+  const ipv4Match = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [, a, b, c, d] = ipv4Match.map(Number);
+    if (a > 255 || b > 255 || c > 255 || d > 255) {
+      return { valid: false, error: 'Invalid IPv4 address format' };
+    }
+  } else if (ip.includes(':')) {
+    // IPv6 地址基本格式检查
+    const ipv6 = ip.replace(/^\[|\]$/g, '');
+    if (!ipv6.match(/^[0-9a-f:]+$/i)) {
+      return { valid: false, error: 'Invalid IPv6 address format' };
+    }
+  } else {
+    return { valid: false, error: 'Invalid IP address format' };
+  }
+  
+  return { valid: true };
+}

@@ -9,6 +9,7 @@
  */
 
 import { PROXY_CONFIG, REQUEST_TIMEOUT_CONFIG } from "./config.js";
+import { validateProxyInfo } from "./security.js";
 
 // 代理源配置
 const PROXY_SOURCES = [
@@ -193,6 +194,14 @@ async function fetchFromSource(
           return null;
         }
         const [ip, port] = parts;
+        
+        // 验证代理信息
+        const validation = validateProxyInfo(ip, port);
+        if (!validation.valid) {
+          console.warn(`[ProxyFetcher] 无效的代理 ${proxy}: ${validation.error}`);
+          return null;
+        }
+        
         return {
           ip,
           port,
