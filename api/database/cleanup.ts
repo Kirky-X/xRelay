@@ -5,7 +5,10 @@
 
 /**
  * Database Cleanup - 数据库清理模块
- * 定期清理过期的废弃代理
+ * 由 Vercel Cron Jobs 定期调用，清理过期的废弃代理
+ * 
+ * 注意：在 Vercel 无服务器环境中，setInterval 不会持久运行。
+ * 清理任务通过 /api/cron/cleanup 端点由 Vercel Cron Jobs 触发。
  */
 
 import { isDatabaseReady } from "./connection.js";
@@ -14,9 +17,6 @@ import {
   getDeprecatedProxyStats,
 } from "./deprecated-proxies-dao.js";
 import { DATABASE_CONFIG } from "../config.js";
-
-// 清理任务 ID
-let cleanupTaskId: NodeJS.Timeout | null = null;
 
 /**
  * 执行清理任务
@@ -72,58 +72,17 @@ export async function runCleanup(): Promise<{
 }
 
 /**
- * 启动自动清理任务
+ * 获取清理任务配置
+ * 注意：实际的定时清理由 Vercel Cron Jobs 触发
  */
-export function startCleanupTask(): void {
-  if (!isDatabaseReady()) {
-    console.log("[Cleanup] Database not ready, cleanup task not started");
-    return;
-  }
-
-  if (cleanupTaskId) {
-    console.log("[Cleanup] Cleanup task already running");
-    return;
-  }
-
-  console.log(
-    `[Cleanup] Starting cleanup task (interval: ${DATABASE_CONFIG.cleanupInterval}ms)`,
-  );
-
-  // 立即执行一次清理
-  runCleanup().catch((error) => {
-    console.error("[Cleanup] Initial cleanup failed:", error);
-  });
-
-  // 定期执行清理
-  cleanupTaskId = setInterval(() => {
-    runCleanup().catch((error) => {
-      console.error("[Cleanup] Scheduled cleanup failed:", error);
-    });
-  }, DATABASE_CONFIG.cleanupInterval);
-}
-
-/**
- * 停止自动清理任务
- */
-export function stopCleanupTask(): void {
-  if (cleanupTaskId) {
-    clearInterval(cleanupTaskId);
-    cleanupTaskId = null;
-    console.log("[Cleanup] Cleanup task stopped");
-  }
-}
-
-/**
- * 获取清理任务状态
- */
-export function getCleanupTaskStatus(): {
-  running: boolean;
+export function getCleanupConfig(): {
   interval: number;
   retentionDays: number;
+  cronEndpoint: string;
 } {
   return {
-    running: cleanupTaskId !== null,
     interval: DATABASE_CONFIG.cleanupInterval,
     retentionDays: DATABASE_CONFIG.deprecatedRetentionDays,
+    cronEndpoint: "/api/cron/cleanup",
   };
 }

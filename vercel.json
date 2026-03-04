@@ -10,5 +10,11 @@
     "api/index.ts": {
       "maxDuration": 10
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/cleanup",
+      "schedule": "0 */6 * * *"
+    }
+  ]
 }
