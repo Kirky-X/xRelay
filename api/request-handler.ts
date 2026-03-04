@@ -74,6 +74,8 @@ const DANGEROUS_HEADERS = new Set([
   'connection',
   'keep-alive',
   'upgrade',
+  'te',
+  'trailer',
   // 代理相关
   'proxy-authorization',
   'proxy-connection',
@@ -89,6 +91,19 @@ const DANGEROUS_HEADERS = new Set([
   'authorization',
   'cookie',
   'set-cookie',
+  // 可能导致问题的 headers
+  'expect',
+  'range',
+  'if-match',
+  'if-none-match',
+  'if-modified-since',
+  'if-unmodified-since',
+  'if-range',
+  // 安全相关
+  'front-end-https',
+  'x-originating-url',
+  'x-wap-profile',
+  'x-att-deviceid',
 ]);
 
 /**
@@ -99,11 +114,38 @@ export function filterDangerousHeaders(headers: Record<string, string>): Record<
   
   for (const [key, value] of Object.entries(headers)) {
     const lowerKey = key.toLowerCase();
-    if (!DANGEROUS_HEADERS.has(lowerKey)) {
-      filtered[key] = value;
-    } else {
+    
+    // 检查是否为危险 header
+    if (DANGEROUS_HEADERS.has(lowerKey)) {
       console.log(`[RequestHandler] 过滤危险 header: ${key}`);
+      continue;
     }
+    
+    // 验证 header 名称：不允许包含控制字符和特殊字符
+    if (!key.match(/^[a-zA-Z0-9!#$%&'*+-.^_`|~]+$/)) {
+      console.log(`[RequestHandler] 过滤无效 header 名称: ${key}`);
+      continue;
+    }
+    
+    // 验证 header 值：防止 CRLF 注入
+    if (typeof value !== 'string') {
+      console.log(`[RequestHandler] 过滤非字符串 header 值: ${key}`);
+      continue;
+    }
+    
+    // 检查是否包含换行符（CRLF 注入防护）
+    if (value.includes('\r') || value.includes('\n')) {
+      console.log(`[RequestHandler] 过滤包含换行符的 header 值: ${key}`);
+      continue;
+    }
+    
+    // 检查是否包含空字节
+    if (value.includes('\0')) {
+      console.log(`[RequestHandler] 过滤包含空字节的 header 值: ${key}`);
+      continue;
+    }
+    
+    filtered[key] = value;
   }
   
   return filtered;
