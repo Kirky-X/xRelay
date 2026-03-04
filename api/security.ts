@@ -13,14 +13,32 @@ import { SECURITY_CONFIG } from "./config.js";
 /**
  * 将 IPv6 映射地址转换为 IPv4 地址
  * 例如: ::ffff:127.0.0.1 -> 127.0.0.1
+ * 也支持十六进制格式: ::ffff:7f00:1 -> 127.0.0.1
  */
 function normalizeIPv6Mapping(hostname: string): string {
-  // 处理 IPv6 映射地址 ::ffff:x.x.x.x
-  const v4Mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i;
-  const match = hostname.match(v4Mapped);
-  if (match) {
-    return match[1];
+  // 处理 IPv6 映射地址 ::ffff:x.x.x.x（点分十进制格式）
+  const v4MappedDecimal = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i;
+  const decimalMatch = hostname.match(v4MappedDecimal);
+  if (decimalMatch) {
+    return decimalMatch[1];
   }
+
+  // 处理 IPv6 映射地址 ::ffff:xxxx:xxxx（十六进制格式）
+  // IPv4 映射地址范围是 ::ffff:0:0/96
+  const v4MappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i;
+  const hexMatch = hostname.match(v4MappedHex);
+  if (hexMatch) {
+    // 将两个 16 位十六进制数转换为 IPv4 地址
+    const part1 = parseInt(hexMatch[1], 16);
+    const part2 = parseInt(hexMatch[2], 16);
+    // 第一个部分是 IP 的高 16 位，第二个部分是低 16 位
+    const a = (part1 >> 8) & 0xff;
+    const b = part1 & 0xff;
+    const c = (part2 >> 8) & 0xff;
+    const d = part2 & 0xff;
+    return `${a}.${b}.${c}.${d}`;
+  }
+
   return hostname;
 }
 
@@ -98,6 +116,9 @@ export function validateUrl(url: string): { valid: boolean; error?: string } {
     // 检查是否为内网地址
     let hostname = parsedUrl.hostname;
 
+    // 移除 IPv6 地址的方括号
+    hostname = hostname.replace(/^\[|\]$/g, "");
+
     // 处理 IPv6 映射地址
     hostname = normalizeIPv6Mapping(hostname);
 
@@ -166,6 +187,9 @@ export function validateUrl(url: string): { valid: boolean; error?: string } {
  * 验证是否为有效的公网 IP
  */
 export function isValidPublicIp(ip: string): boolean {
+  // 处理 IPv6 映射地址
+  ip = normalizeIPv6Mapping(ip);
+  
   // 简单的 IPv4 验证
   const ipv4Match = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!ipv4Match) return false;
@@ -177,10 +201,14 @@ export function isValidPublicIp(ip: string): boolean {
   const ipNum = ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
 
   // 排除内网地址
-  if ((ipNum & 0xff000000) >>> 0 === 0x7f000000) return false; // 127.0.0.0/8
-  if ((ipNum & 0xff000000) >>> 0 === 0x0a000000) return false; // 10.0.0.0/8
-  if ((ipNum & 0xfff00000) >>> 0 === 0xac100000) return false; // 172.16.0.0/12
-  if ((ipNum & 0xffff0000) >>> 0 === 0xc0a80000) return false; // 192.168.0.0/16
+  if ((ipNum & 0xff000000) >>> 0 === 0x00000000) return false; // 0.0.0.0/8 (Reserved)
+  if ((ipNum & 0xff000000) >>> 0 === 0x7f000000) return false; // 127.0.0.0/8 (Loopback)
+  if ((ipNum & 0xff000000) >>> 0 === 0x0a000000) return false; // 10.0.0.0/8 (Private A)
+  if ((ipNum & 0xfff00000) >>> 0 === 0xac100000) return false; // 172.16.0.0/12 (Private B)
+  if ((ipNum & 0xffff0000) >>> 0 === 0xc0a80000) return false; // 192.168.0.0/16 (Private C)
+  if ((ipNum & 0xffff0000) >>> 0 === 0xa9fe0000) return false; // 169.254.0.0/16 (Link-local)
+  if ((ipNum & 0xf0000000) >>> 0 === 0xe0000000) return false; // 224.0.0.0/4 (Multicast)
+  if ((ipNum & 0xf0000000) >>> 0 === 0xf0000000) return false; // 240.0.0.0/4 (Reserved)
 
   return true;
 }
