@@ -89,13 +89,14 @@ function validateDaysParameter(days: number): void {
  */
 export async function getExpiredDeprecatedProxies(days: number = 30): Promise<DeprecatedProxy[]> {
   validateDaysParameter(days);
-  const safeDays = Math.floor(days);
+  // 使用参数化查询避免 SQL 注入
+  // INTERVAL '1 day' * $1 是安全的参数化方式
   const text = `
     SELECT * FROM xrelay.deprecated_proxies
-    WHERE deprecated_at < NOW() - INTERVAL '${safeDays} days'
+    WHERE deprecated_at < NOW() - INTERVAL '1 day' * $1
     ORDER BY deprecated_at ASC
   `;
-  const result = await query(text);
+  const result = await query(text, [days]);
   return result.rows;
 }
 
@@ -104,12 +105,12 @@ export async function getExpiredDeprecatedProxies(days: number = 30): Promise<De
  */
 export async function deleteExpiredDeprecatedProxies(days: number = 30): Promise<number> {
   validateDaysParameter(days);
-  const safeDays = Math.floor(days);
+  // 使用参数化查询避免 SQL 注入
   const text = `
     DELETE FROM xrelay.deprecated_proxies
-    WHERE deprecated_at < NOW() - INTERVAL '${safeDays} days'
+    WHERE deprecated_at < NOW() - INTERVAL '1 day' * $1
   `;
-  const result = await query(text);
+  const result = await query(text, [days]);
   return result.rowCount || 0;
 }
 
