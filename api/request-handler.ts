@@ -277,7 +277,8 @@ export async function sendProxyRequest(
 }
 
 /**
- * 通过多个代理串行尝试发送请求（失败则切换代理或 Fallback）
+ * 通过多个代理并行尝试发送请求（竞速模式）
+ * 同时尝试多个代理，返回第一个成功的响应
  */
 export async function sendRequestWithMultipleProxies(
   request: ProxyRequest,
@@ -288,7 +289,7 @@ export async function sendRequestWithMultipleProxies(
   const { DATABASE_CONFIG } = await import("./config.js");
   const actualProxyCount = proxyCount || DATABASE_CONFIG.proxiesPerRequest;
 
-  console.log(`[RequestHandler] 串行尝试最多 ${actualProxyCount} 个代理`);
+  console.log(`[RequestHandler] 并行尝试最多 ${actualProxyCount} 个代理`);
 
   // 获取代理（最多 actualProxyCount 个，不足则获取所有可用代理）
   const proxies = await getMultipleProxies(actualProxyCount);
@@ -319,29 +320,17 @@ export async function sendRequestWithMultipleProxies(
     };
   }
 
-  console.log(`[RequestHandler] 获取到 ${proxies.length} 个代理`);
+  console.log(`[RequestHandler] 获取到 ${proxies.length} 个代理，开始并行尝试`);
 
-  // 串行尝试每个代理
-  for (let i = 0; i < proxies.length; i++) {
-    const proxy = proxies[i];
-    console.log(`[RequestHandler] 尝试代理 ${i + 1}/${proxies.length}: ${proxy.ip}:${proxy.port}`);
-
-    // 使用前检测可达性
-    const { checkProxyReachability, moveUnreachableProxyToDeprecated } = await import("./proxy-tester.js");
-    const reachabilityCheck = await checkProxyReachability(proxy);
-
-    if (!reachabilityCheck.reachable) {
-      console.log(`[RequestHandler] 代理不可达，跳过: ${reachabilityCheck.error}`);
-      await moveUnreachableProxyToDeprecated(proxy, reachabilityCheck.error);
-      reportProxyFailed(proxy);
-      continue; // 尝试下一个代理
-    }
+  // 并行尝试所有代理
+  const proxyPromises = proxies.map(async (proxy) => {
+    console.log(`[RequestHandler] 开始尝试代理: ${proxy.ip}:${proxy.port}`);
 
     try {
       const result = await sendRequestWithProxy(request, proxy);
 
       if (result.success) {
-        console.log(`[RequestHandler] 代理请求成功`);
+        console.log(`[RequestHandler] 代理请求成功: ${proxy.ip}:${proxy.port}`);
         reportProxySuccess(proxy);
         return {
           success: true,
@@ -354,14 +343,34 @@ export async function sendRequestWithMultipleProxies(
           fallbackUsed: false,
         };
       } else {
-        console.log(`[RequestHandler] 代理请求失败: ${result.error}`);
+        console.log(`[RequestHandler] 代理请求失败: ${proxy.ip}:${proxy.port} - ${result.error}`);
         reportProxyFailed(proxy);
+        return null; // 失败返回 null
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      console.log(`[RequestHandler] 代理请求异常: ${errorMessage}`);
+      console.log(`[RequestHandler] 代理请求异常: ${proxy.ip}:${proxy.port} - ${errorMessage}`);
       reportProxyFailed(proxy);
+      return null;
     }
+  });
+
+  // 使用 Promise.any 获取第一个成功的结果
+  try {
+    const result = await Promise.any(
+      proxyPromises.map(p => p.then(r => {
+        if (r && r.success) return r;
+        throw new Error('Proxy failed');
+      }))
+    );
+    
+    // 找到成功的代理
+    if (result && result.success) {
+      return result;
+    }
+  } catch (aggregateError) {
+    // 所有代理都失败
+    console.log(`[RequestHandler] 所有 ${proxies.length} 个代理都失败`);
   }
 
   // 所有代理都失败，回退到直连
@@ -376,7 +385,7 @@ export async function sendRequestWithMultipleProxies(
     };
   }
 
-  console.log(`[RequestHandler] 所有 ${proxies.length} 个代理都失败，回退到直连`);
+  console.log(`[RequestHandler] 所有代理失败，回退到直连`);
   const directResult = await sendRequestDirect(request);
 
   return {
