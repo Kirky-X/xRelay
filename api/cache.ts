@@ -9,7 +9,7 @@
  */
 
 import type { ProxyResponse } from "./request-handler.js";
-import type { createClient } from "@vercel/kv";
+import { getKV } from "./kv-client.js";
 import { CACHE_CONFIG } from "./config.js";
 
 // 缓存条目
@@ -17,41 +17,6 @@ interface CacheEntry {
   response: ProxyResponse;
   timestamp: number;
   expiredAt: number; // 废弃时间戳
-}
-
-type KVClient = ReturnType<typeof createClient>;
-
-let kvClient: KVClient | null = null;
-let kvClientPromise: Promise<KVClient | null> | null = null;
-
-async function getKV(): Promise<KVClient | null> {
-  if (kvClient) {
-    return kvClient;
-  }
-
-  if (kvClientPromise) {
-    return kvClientPromise;
-  }
-
-  kvClientPromise = (async () => {
-    const { createClient } = await import("@vercel/kv");
-
-    const url = process.env.KV_REST_API_URL;
-    const token = process.env.KV_REST_API_TOKEN;
-
-    if (!url || !token) {
-      return null;
-    }
-
-    kvClient = createClient({
-      url,
-      token,
-    });
-
-    return kvClient;
-  })();
-
-  return kvClientPromise;
 }
 
 /**

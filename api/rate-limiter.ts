@@ -8,48 +8,13 @@
  * 防止滥用，保护服务稳定性
  */
 
-import type { createClient } from "@vercel/kv";
+import { getKV } from "./kv-client.js";
 import { RATE_LIMIT_CONFIG } from "./config.js";
 
 // 限流记录
 interface RateLimitRecord {
   count: number;
   resetTime: number;
-}
-
-type KVClient = ReturnType<typeof createClient>;
-
-let kvClient: KVClient | null = null;
-let kvClientPromise: Promise<KVClient | null> | null = null;
-
-async function getKV(): Promise<KVClient | null> {
-  if (kvClient) {
-    return kvClient;
-  }
-
-  if (kvClientPromise) {
-    return kvClientPromise;
-  }
-
-  kvClientPromise = (async () => {
-    const { createClient } = await import("@vercel/kv");
-
-    const url = process.env.KV_REST_API_URL;
-    const token = process.env.KV_REST_API_TOKEN;
-
-    if (!url || !token) {
-      return null;
-    }
-
-    kvClient = createClient({
-      url,
-      token,
-    });
-
-    return kvClient;
-  })();
-
-  return kvClientPromise;
 }
 
 /**
