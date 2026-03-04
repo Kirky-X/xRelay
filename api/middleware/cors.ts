@@ -4,9 +4,10 @@
  */
 
 import type { Middleware, MiddlewareContext } from "./types.js";
+import { CORS_CONFIG } from "../config.js";
 
 /**
- * CORS 配置
+ * CORS 配置类型
  */
 export interface CorsConfig {
   allowedOrigins: string[];
@@ -16,18 +17,9 @@ export interface CorsConfig {
 }
 
 /**
- * 默认 CORS 配置
+ * 使用统一配置作为默认值
  */
-export const DEFAULT_CORS_CONFIG: CorsConfig = {
-  allowedOrigins: [
-    "https://vercel-proxy-shield.vercel.app",
-    "http://localhost:3000",
-    "http://localhost:5173",
-  ],
-  allowedMethods: ["POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-api-key"],
-  maxAge: 86400,
-};
+export const DEFAULT_CORS_CONFIG: CorsConfig = CORS_CONFIG;
 
 /**
  * 获取请求头值（兼容 Headers 对象和普通对象）

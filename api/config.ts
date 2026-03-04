@@ -102,6 +102,18 @@ export const REQUEST_TIMEOUT_CONFIG = {
   direct: 10000,
 };
 
+// CORS 配置
+export const CORS_CONFIG = {
+  allowedOrigins: [
+    "https://vercel-proxy-shield.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+  ],
+  allowedMethods: ["POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "x-api-key"],
+  maxAge: 86400, // 24小时
+};
+
 // 安全配置
 export const SECURITY_CONFIG = {
   // URL 白名单（防止 SSRF）

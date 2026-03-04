@@ -11,6 +11,7 @@ export type { Middleware, MiddlewareContext, RequestBody, ComposedMiddleware } f
 export { compose, respond, when } from "./compose.js";
 export { corsMiddleware, optionsMiddleware, DEFAULT_CORS_CONFIG } from "./cors.js";
 export type { CorsConfig } from "./cors.js";
+export { CORS_CONFIG } from "../config.js";
 export { apiKeyMiddleware } from "./api-key.js";
 export type { ApiKeyConfig } from "./api-key.js";
 export { rateLimitMiddleware } from "./rate-limit.js";
