@@ -212,3 +212,102 @@ export function isValidPublicIp(ip: string): boolean {
 
   return true;
 }
+
+/**
+ * DNS 解析结果缓存
+ * 用于防止 DNS 重绑定攻击
+ */
+const dnsCache = new Map<string, { ips: string[]; timestamp: number }>();
+const DNS_CACHE_TTL = 60 * 1000; // 60 秒缓存
+
+/**
+ * 使用 DNS-over-HTTPS 解析域名
+ * 防止 DNS 重绑定攻击
+ */
+export async function resolveDns(hostname: string): Promise<string[]> {
+  // 检查缓存
+  const cached = dnsCache.get(hostname);
+  if (cached && Date.now() - cached.timestamp < DNS_CACHE_TTL) {
+    return cached.ips;
+  }
+
+  // 如果是 IP 地址，直接返回
+  const ipv4Match = hostname.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (ipv4Match) {
+    return [hostname];
+  }
+
+  // IPv6 地址
+  if (hostname.includes(':')) {
+    return [hostname];
+  }
+
+  try {
+    // 使用 Cloudflare DNS-over-HTTPS
+    const response = await fetch(
+      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=A`,
+      {
+        headers: {
+          Accept: 'application/dns-json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`DNS query failed: ${response.status}`);
+    }
+
+    const data = await response.json() as { Answer?: { data: string }[] };
+    const ips = data.Answer?.map(a => a.data).filter(Boolean) || [];
+
+    // 缓存结果
+    dnsCache.set(hostname, { ips, timestamp: Date.now() });
+
+    return ips;
+  } catch (error) {
+    console.error(`[Security] DNS resolution failed for ${hostname}:`, error);
+    return [];
+  }
+}
+
+/**
+ * 验证 DNS 解析后的 IP 地址是否安全
+ * 用于防止 DNS 重绑定攻击
+ * 
+ * @param hostname 要验证的主机名
+ * @returns 验证结果
+ */
+export async function validateDnsResolution(hostname: string): Promise<{ valid: boolean; ips?: string[]; error?: string }> {
+  try {
+    const ips = await resolveDns(hostname);
+    
+    if (ips.length === 0) {
+      return { valid: false, error: 'DNS resolution returned no results' };
+    }
+
+    // 检查所有解析的 IP 是否为公网地址
+    for (const ip of ips) {
+      if (!isValidPublicIp(ip)) {
+        return { 
+          valid: false, 
+          error: `DNS resolved to blocked IP: ${ip}`,
+          ips 
+        };
+      }
+    }
+
+    return { valid: true, ips };
+  } catch (error) {
+    return { 
+      valid: false, 
+      error: error instanceof Error ? error.message : 'DNS resolution failed' 
+    };
+  }
+}
+
+/**
+ * 清除 DNS 缓存
+ */
+export function clearDnsCache(): void {
+  dnsCache.clear();
+}
