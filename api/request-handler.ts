@@ -38,6 +38,30 @@ export interface ProxyResponse {
   error?: string;
 }
 
+// HTTP 方法类型
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
+
+// Undici 响应 headers 类型（来自 http.IncomingHttpHeaders）
+interface UndiciHeaders extends Record<string, string | string[] | undefined> {
+  [key: string]: string | string[] | undefined;
+}
+
+// Undici body 类型
+interface BodyReadable {
+  on(event: 'data', listener: (chunk: Buffer) => void): this;
+  on(event: 'end', listener: () => void): this;
+  on(event: 'error', listener: (err: Error) => void): this;
+  destroy(): void;
+}
+
+// Undici 响应类型
+interface UndiciResponse {
+  statusCode: number;
+  headers: UndiciHeaders;
+  body: BodyReadable | null;
+  trailers: Record<string, string>;
+}
+
 /**
  * 危险 Headers 列表（大小写不敏感）
  * 这些 headers 可能被用于请求走私、注入攻击或绕过安全控制
@@ -118,32 +142,35 @@ async function sendRequestWithProxy(
 
     // 构建 undici 请求选项
     const undiciOptions = {
-      method: request.method as any,
-      headers: filteredHeaders as any,
+      method: request.method.toUpperCase() as HttpMethod,
+      headers: filteredHeaders as Record<string, string>,
       dispatcher,
-      signal: controller.signal as any,
+      signal: controller.signal,
       body: request.body,
     };
 
-    const response = await undiciRequest(request.url, undiciOptions);
+    const response = await undiciRequest(request.url, undiciOptions) as unknown as UndiciResponse;
     clearTimeout(timeoutId);
 
-    // 使用 ReadableStream 读取响应体
+    // 使用流式读取响应体
     let text = '';
     if (response.body) {
-      const chunks: Buffer[] = [];
-      for await (const chunk of response.body as any) {
-        chunks.push(chunk);
-      }
-      text = Buffer.concat(chunks).toString('utf-8');
+      text = await new Promise<string>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        response.body!.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.body!.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+        response.body!.on('error', reject);
+      });
     }
 
     const headers: Record<string, string> = {};
-    const responseHeaders = response.headers as any;
-    if (responseHeaders && typeof responseHeaders.forEach === 'function') {
-      responseHeaders.forEach((value: string, key: string) => {
-        headers[key] = value;
-      });
+    if (response.headers) {
+      for (const [key, value] of Object.entries(response.headers)) {
+        if (value !== undefined) {
+          // 处理数组值（如 Set-Cookie）
+          headers[key] = Array.isArray(value) ? value.join(', ') : value;
+        }
+      }
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
