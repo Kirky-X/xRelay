@@ -56,16 +56,26 @@ function validateApiKey(request: Request, config: ApiKeyConfig): boolean {
 
 /**
  * 常量时间字符串比较（防止时序攻击）
+ * 使用填充确保无论长度如何都执行相同时间
  */
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-
+  // 使用最大长度进行填充，确保恒定时间
+  const maxLen = Math.max(a.length, b.length, 64); // 至少比较 64 字节
+  
+  // 填充两个字符串到相同长度
+  const paddedA = a.padEnd(maxLen, '\0');
+  const paddedB = b.padEnd(maxLen, '\0');
+  
+  // 恒定时间比较
   let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  for (let i = 0; i < maxLen; i++) {
+    result |= paddedA.charCodeAt(i) ^ paddedB.charCodeAt(i);
   }
+  
+  // 额外检查长度是否相同（但不影响主比较的时间）
+  // 长度检查放在最后，不会泄露长度差异的时间信息
+  result |= (a.length ^ b.length);
+  
   return result === 0;
 }
 
