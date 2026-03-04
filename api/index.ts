@@ -14,6 +14,7 @@ import { getCachedResponse, cacheResponse } from "./cache.js";
 import { sendRequestWithMultipleProxies } from "./request-handler.js";
 import type { ProxyRequest } from "./request-handler.js";
 import { initDatabase } from "./database/connection.js";
+import { logger } from "./logger.js";
 import {
   compose,
   corsMiddleware,
@@ -75,7 +76,7 @@ function getClientIp(request: Request): string {
 async function productionConfigMiddleware(context: MiddlewareContext, next: () => Promise<void>): Promise<void> {
   const configValidation = validateProductionConfig();
   if (!configValidation.valid) {
-    console.error("[Main] Invalid production config:", configValidation.errors);
+    logger.main.error("Invalid production config", { errors: configValidation.errors });
     context.response = new Response(JSON.stringify({
       error: "Server misconfigured",
       code: "CONFIG_ERROR",
@@ -101,15 +102,11 @@ async function databaseInitMiddleware(context: MiddlewareContext, next: () => Pr
  * 日志中间件
  */
 async function loggingMiddleware(context: MiddlewareContext, next: () => Promise<void>): Promise<void> {
-  if (SECURITY_CONFIG.enableVerboseLogging) {
-    console.log(`[Main] 请求来自 IP: ${context.clientIp}`);
-  }
+  logger.main.verbose("Request received", { clientIp: context.clientIp });
   const startTime = Date.now();
   await next();
   const duration = Date.now() - startTime;
-  if (SECURITY_CONFIG.enableVerboseLogging) {
-    console.log(`[Main] 请求完成，耗时: ${duration}ms`);
-  }
+  logger.main.verbose("Request completed", { duration: `${duration}ms` });
 }
 
 /**
@@ -125,9 +122,7 @@ async function cacheMiddleware(context: MiddlewareContext, next: () => Promise<v
   if (useCache) {
     const cached = await getCachedResponse(context.body.url, context.body.method || "GET");
     if (cached) {
-      if (SECURITY_CONFIG.enableVerboseLogging) {
-        console.log(`[Main] 返回缓存响应`);
-      }
+      logger.main.verbose("Returning cached response");
       context.response = createJsonResponse(200, cached, context.request);
       return;
     }
@@ -170,9 +165,9 @@ async function proxyHandlerMiddleware(context: MiddlewareContext, next: () => Pr
 
     context.response = createJsonResponse(200, response, context.request);
   } catch (error) {
-    if (SECURITY_CONFIG.enableVerboseLogging) {
-      console.log(`[Main] 处理请求失败: ${error}`);
-    }
+    logger.main.error("Request handling failed", { 
+      error: error instanceof Error ? error.message : String(error) 
+    });
     context.response = createJsonResponse(500, {
       error: "Internal server error",
       code: "INTERNAL_ERROR",
