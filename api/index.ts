@@ -5,30 +5,25 @@
 
 /**
  * Vercel Edge Function - 主入口
- * 处理所有代理请求
+ * 使用中间件管道处理代理请求
  */
 
 import { SECURITY_CONFIG, API_KEY_CONFIG, FEATURES, validateProductionConfig } from "./config.js";
-import { validateUrl, isValidPublicIp } from "./security.js";
-import { checkGlobalRateLimit, checkIpRateLimit } from "./rate-limiter.js";
+import { isValidPublicIp } from "./security.js";
 import { getCachedResponse, cacheResponse } from "./cache.js";
 import { sendRequestWithMultipleProxies } from "./request-handler.js";
 import type { ProxyRequest } from "./request-handler.js";
 import { initDatabase } from "./database/connection.js";
-
-// 类型定义
-interface RequestBody {
-  url: string;
-  method?: string;
-  headers?: Record<string, string>;
-  body?: string;
-  useCache?: boolean;
-}
-const CONFIG = {
-  maxProxyAttempts: 3,
-  useFallback: true,
-  enableCache: true,
-};
+import {
+  compose,
+  corsMiddleware,
+  apiKeyMiddleware,
+  rateLimitMiddleware,
+  bodyParserMiddleware,
+  urlValidationMiddleware,
+  type MiddlewareContext,
+  DEFAULT_CORS_CONFIG,
+} from "./middleware/index.js";
 
 export const config = {
   runtime: "nodejs",
@@ -38,270 +33,12 @@ export const config = {
  * 获取请求头值（兼容 Headers 对象和普通对象）
  */
 function getHeaderValue(headers: Headers | Record<string, string>, name: string): string | null {
-  if (headers && typeof headers.get === 'function') {
+  if (headers && typeof headers.get === "function") {
     return headers.get(name);
   } else if (headers && (headers as Record<string, string>)[name]) {
     return (headers as Record<string, string>)[name];
   }
   return null;
-}
-
-/**
- * 验证 API Key
- */
-function validateApiKey(request: Request): boolean {
-  // 如果未启用 API Key 验证，直接通过
-  if (!API_KEY_CONFIG.enabled) {
-    return true;
-  }
-
-  // 如果没有配置任何 API Key，直接通过（避免误拦截）
-  if (API_KEY_CONFIG.keys.length === 0) {
-    return true;
-  }
-
-  // 获取请求中的 API Key
-  const apiKey = getHeaderValue(request.headers, API_KEY_CONFIG.headerName);
-  
-  if (!apiKey) {
-    return false;
-  }
-
-  // 检查 API Key 是否有效
-  return API_KEY_CONFIG.keys.includes(apiKey);
-}
-
-/**
- * 主处理函数
- */
-export default async function handler(request: Request): Promise<Response> {
-  const startTime = Date.now();
-
-  // 0. 验证生产环境配置
-  const configValidation = validateProductionConfig();
-  if (!configValidation.valid) {
-    console.error("[Main] Invalid production config:", configValidation.errors);
-    return new Response(JSON.stringify({
-      error: "Server misconfigured",
-      code: "CONFIG_ERROR",
-      details: configValidation.errors,
-    }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // 确保数据库已初始化
-  await initDatabase();
-
-  // 1. 验证 API Key
-  if (!validateApiKey(request)) {
-    if (SECURITY_CONFIG.enableVerboseLogging) {
-      console.log(`[Main] API Key 验证失败`);
-    }
-    return createJsonResponse(
-      401,
-      {
-        error: "Unauthorized",
-        code: "INVALID_API_KEY",
-      },
-      request,
-    );
-  }
-
-  // 2. 获取客户端 IP
-  const clientIp = getClientIp(request);
-  if (SECURITY_CONFIG.enableVerboseLogging) {
-    console.log(`[Main] 请求来自 IP: ${clientIp}`);
-  }
-
-  // 3. 检查限流（全局）
-  if (FEATURES.enableRateLimit) {
-    const globalLimit = await checkGlobalRateLimit();
-    if (!globalLimit.allowed) {
-      if (SECURITY_CONFIG.enableVerboseLogging) {
-        console.log(`[Main] 全局限流触发`);
-      }
-      return createJsonResponse(
-        429,
-        {
-          error: "Rate limit exceeded. Please try again later.",
-          code: "RATE_LIMIT_GLOBAL",
-          retryAfter: Math.ceil(globalLimit.resetIn / 1000),
-        },
-        request,
-      );
-    }
-  }
-
-  // 4. 检查限流（IP 级别）
-  if (FEATURES.enableRateLimit) {
-    const ipLimit = await checkIpRateLimit(clientIp);
-    if (!ipLimit.allowed) {
-      if (SECURITY_CONFIG.enableVerboseLogging) {
-        console.log(`[Main] IP限流触发`);
-      }
-      return createJsonResponse(
-        429,
-        {
-          error: "Rate limit exceeded for your IP.",
-          code: "RATE_LIMIT_IP",
-          retryAfter: Math.ceil(ipLimit.resetIn / 1000),
-        },
-        request,
-      );
-    }
-  }
-
-  // 5. 处理 OPTIONS 请求（CORS 预检）
-  if (request.method === "OPTIONS") {
-    const origin = getHeaderValue(request.headers, "origin");
-    const allowedOrigins = [
-      "https://vercel-proxy-shield.vercel.app",
-      "http://localhost:3000",
-      "http://localhost:5173",
-    ];
-    const corsOrigin = allowedOrigins.includes(origin || "") ? origin || "" : "";
-
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": corsOrigin,
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, x-api-key",
-        "Access-Control-Max-Age": "86400",
-      },
-    });
-  }
-
-  // 6. 只允许 POST 请求
-  if (request.method !== "POST") {
-    return createJsonResponse(
-      405,
-      {
-        error: "Method not allowed",
-        code: "METHOD_NOT_ALLOWED",
-        allowedMethods: ["POST"],
-      },
-      request,
-    );
-  }
-
-  // 7. 解析请求体
-  let body: RequestBody;
-  try {
-    body = await request.json();
-
-    // 检查请求体大小
-    const bodySize = JSON.stringify(body).length;
-    if (bodySize > SECURITY_CONFIG.maxRequestSize) {
-      if (SECURITY_CONFIG.enableVerboseLogging) {
-        console.log(`[Main] 请求体过大: ${bodySize} bytes`);
-      }
-      return createJsonResponse(
-        413,
-        {
-          error: "Request body too large",
-          code: "REQUEST_TOO_LARGE",
-          maxSize: SECURITY_CONFIG.maxRequestSize,
-        },
-        request,
-      );
-    }
-  } catch (error) {
-    if (SECURITY_CONFIG.enableVerboseLogging) {
-      console.log(`[Main] 解析请求体失败: ${error}`);
-    }
-    return createJsonResponse(
-      400,
-      {
-        error: "Invalid JSON body",
-        code: "INVALID_JSON",
-      },
-      request,
-    );
-  }
-
-  // 8. 验证必需字段
-  if (!body.url) {
-    return createJsonResponse(
-      400,
-      {
-        error: "URL is required",
-        code: "MISSING_URL",
-      },
-      request,
-    );
-  }
-
-  // 9. 验证 URL
-  const urlValidation = validateUrl(body.url);
-  if (!urlValidation.valid) {
-    if (SECURITY_CONFIG.enableVerboseLogging) {
-      console.log(`[Main] URL验证失败: ${urlValidation.error}`);
-    }
-    return createJsonResponse(
-      400,
-      {
-        error: "Invalid URL",
-        code: "INVALID_URL",
-        reason: urlValidation.error,
-      },
-      request,
-    );
-  }
-
-  // 10. 检查缓存
-  let useCache = FEATURES.enableCache && body.useCache !== false;
-  if (useCache) {
-    const cached = await getCachedResponse(body.url, body.method || "GET");
-    if (cached) {
-      if (SECURITY_CONFIG.enableVerboseLogging) {
-        console.log(`[Main] 返回缓存响应`);
-      }
-      return createJsonResponse(200, cached, request);
-    }
-  }
-
-  // 11. 处理代理请求
-  try {
-    const proxyRequest: ProxyRequest = {
-      url: body.url,
-      method: body.method || "GET",
-      headers: body.headers || {},
-      body: body.body,
-    };
-
-    const response = await sendRequestWithMultipleProxies(
-      proxyRequest,
-      CONFIG.maxProxyAttempts,
-      FEATURES.enableFallback,
-    );
-
-    // 缓存成功的响应
-    if (response.success && useCache) {
-      await cacheResponse(body.url, body.method || "GET", response);
-    }
-
-    const duration = Date.now() - startTime;
-    if (SECURITY_CONFIG.enableVerboseLogging) {
-      console.log(`[Main] 请求完成，耗时: ${duration}ms`);
-    }
-
-    return createJsonResponse(200, response, request);
-  } catch (error) {
-    if (SECURITY_CONFIG.enableVerboseLogging) {
-      console.log(`[Main] 处理请求失败: ${error}`);
-    }
-    return createJsonResponse(
-      500,
-      {
-        error: "Internal server error",
-        code: "INTERNAL_ERROR",
-      },
-      request,
-    );
-  }
 }
 
 /**
@@ -333,6 +70,119 @@ function getClientIp(request: Request): string {
 }
 
 /**
+ * 生产配置验证中间件
+ */
+async function productionConfigMiddleware(context: MiddlewareContext, next: () => Promise<void>): Promise<void> {
+  const configValidation = validateProductionConfig();
+  if (!configValidation.valid) {
+    console.error("[Main] Invalid production config:", configValidation.errors);
+    context.response = new Response(JSON.stringify({
+      error: "Server misconfigured",
+      code: "CONFIG_ERROR",
+      details: configValidation.errors,
+    }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+    return;
+  }
+  await next();
+}
+
+/**
+ * 数据库初始化中间件
+ */
+async function databaseInitMiddleware(context: MiddlewareContext, next: () => Promise<void>): Promise<void> {
+  await initDatabase();
+  await next();
+}
+
+/**
+ * 日志中间件
+ */
+async function loggingMiddleware(context: MiddlewareContext, next: () => Promise<void>): Promise<void> {
+  if (SECURITY_CONFIG.enableVerboseLogging) {
+    console.log(`[Main] 请求来自 IP: ${context.clientIp}`);
+  }
+  const startTime = Date.now();
+  await next();
+  const duration = Date.now() - startTime;
+  if (SECURITY_CONFIG.enableVerboseLogging) {
+    console.log(`[Main] 请求完成，耗时: ${duration}ms`);
+  }
+}
+
+/**
+ * 缓存检查中间件
+ */
+async function cacheMiddleware(context: MiddlewareContext, next: () => Promise<void>): Promise<void> {
+  if (!context.body) {
+    await next();
+    return;
+  }
+
+  const useCache = FEATURES.enableCache && context.body.useCache !== false;
+  if (useCache) {
+    const cached = await getCachedResponse(context.body.url, context.body.method || "GET");
+    if (cached) {
+      if (SECURITY_CONFIG.enableVerboseLogging) {
+        console.log(`[Main] 返回缓存响应`);
+      }
+      context.response = createJsonResponse(200, cached, context.request);
+      return;
+    }
+  }
+
+  context.state.useCache = useCache;
+  await next();
+}
+
+/**
+ * 代理处理中间件
+ */
+async function proxyHandlerMiddleware(context: MiddlewareContext, next: () => Promise<void>): Promise<void> {
+  if (!context.body) {
+    context.response = createJsonResponse(500, {
+      error: "Internal server error",
+      code: "NO_BODY",
+    }, context.request);
+    return;
+  }
+
+  try {
+    const proxyRequest: ProxyRequest = {
+      url: context.body.url,
+      method: context.body.method || "GET",
+      headers: context.body.headers || {},
+      body: context.body.body,
+    };
+
+    const response = await sendRequestWithMultipleProxies(
+      proxyRequest,
+      3, // maxProxyAttempts
+      FEATURES.enableFallback,
+    );
+
+    // 缓存成功的响应
+    if (response.success && context.state.useCache) {
+      await cacheResponse(context.body.url, context.body.method || "GET", response);
+    }
+
+    context.response = createJsonResponse(200, response, context.request);
+  } catch (error) {
+    if (SECURITY_CONFIG.enableVerboseLogging) {
+      console.log(`[Main] 处理请求失败: ${error}`);
+    }
+    context.response = createJsonResponse(500, {
+      error: "Internal server error",
+      code: "INTERNAL_ERROR",
+    }, context.request);
+  }
+
+  await next();
+}
+
+/**
  * 创建 JSON 响应
  */
 function createJsonResponse(
@@ -341,13 +191,7 @@ function createJsonResponse(
   request?: Request,
 ): Response {
   const origin = request ? getHeaderValue(request.headers, "origin") : null;
-  const allowedOrigins = [
-    "https://vercel-proxy-shield.vercel.app",
-    "http://localhost:3000",
-    "http://localhost:5173",
-  ];
-
-  const corsOrigin = allowedOrigins.includes(origin || "") ? origin || "" : "";
+  const corsOrigin = DEFAULT_CORS_CONFIG.allowedOrigins.includes(origin || "") ? origin || "" : "";
 
   return new Response(JSON.stringify(data), {
     status,
@@ -359,4 +203,61 @@ function createJsonResponse(
       "Cache-Control": "no-cache",
     },
   });
+}
+
+/**
+ * 组合中间件管道
+ */
+const pipeline = compose(
+  // 1. 生产环境配置验证
+  productionConfigMiddleware,
+  // 2. 数据库初始化
+  databaseInitMiddleware,
+  // 3. 日志记录
+  loggingMiddleware,
+  // 4. API Key 验证
+  apiKeyMiddleware(API_KEY_CONFIG),
+  // 5. 限流检查
+  rateLimitMiddleware({
+    enabled: FEATURES.enableRateLimit,
+    enableGlobalLimit: true,
+    enableIpLimit: true,
+  }),
+  // 6. CORS 处理
+  corsMiddleware(DEFAULT_CORS_CONFIG),
+  // 7. 请求体解析
+  bodyParserMiddleware({
+    maxSize: SECURITY_CONFIG.maxRequestSize,
+    allowedMethods: ["POST"],
+  }),
+  // 8. URL 验证
+  urlValidationMiddleware(),
+  // 9. 缓存检查
+  cacheMiddleware,
+  // 10. 代理处理
+  proxyHandlerMiddleware,
+);
+
+/**
+ * 主处理函数
+ */
+export default async function handler(request: Request): Promise<Response> {
+  const context: MiddlewareContext = {
+    request,
+    clientIp: getClientIp(request),
+    startTime: Date.now(),
+    state: {},
+  };
+
+  await pipeline(context);
+
+  // 如果没有设置响应，返回默认错误
+  if (!context.response) {
+    return createJsonResponse(500, {
+      error: "Internal server error",
+      code: "NO_RESPONSE",
+    }, request);
+  }
+
+  return context.response;
 }
