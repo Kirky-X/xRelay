@@ -9,6 +9,7 @@
  */
 
 import pg from "pg";
+import { createClient } from "@vercel/postgres";
 import { DATABASE_CONFIG } from "../config.js";
 
 const { Pool } = pg;
@@ -132,7 +133,6 @@ export async function query(
   if (useVercelPostgres) {
     // Vercel 环境：使用无服务器客户端
     try {
-      const { createClient } = await import("@vercel/postgres");
       const client = createClient();
 
       // 使用 query 方法（VercelClient 继承自 pg.Client）
@@ -171,7 +171,6 @@ export async function transaction(
 ): Promise<any> {
   if (useVercelPostgres) {
     // Vercel 环境：使用 @vercel/postgres 的事务
-    const { createClient } = await import("@vercel/postgres");
     const client = createClient();
     try {
       await client.connect();

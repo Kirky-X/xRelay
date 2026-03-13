@@ -11,12 +11,6 @@
 import { getKV } from "./kv-client.js";
 import { RATE_LIMIT_CONFIG } from "./config.js";
 
-// 限流记录
-interface RateLimitRecord {
-  count: number;
-  resetTime: number;
-}
-
 /**
  * 生成限流 key
  */
@@ -29,150 +23,67 @@ function generateKey(type: 'global' | 'ip', identifier?: string): string {
 }
 
 /**
- * 检查全局限流
+ * 检查限流（通用实现）
  */
-export async function checkGlobalRateLimit(): Promise<{
-  allowed: boolean;
-  remaining: number;
-  resetIn: number;
-}> {
+async function checkRateLimit(
+  type: 'global' | 'ip',
+  identifier?: string
+): Promise<{ allowed: boolean; remaining: number; resetIn: number }> {
   try {
     const kv = await getKV();
+    const config = type === 'global' ? RATE_LIMIT_CONFIG.global : RATE_LIMIT_CONFIG.ip;
+
     if (!kv) {
-      return { allowed: true, remaining: RATE_LIMIT_CONFIG.global.maxRequests, resetIn: 0 };
+      return { allowed: true, remaining: config.maxRequests, resetIn: 0 };
     }
 
-    const key = generateKey('global');
-    const now = Date.now();
-    const value = await kv.get<RateLimitRecord>(key);
+    const key = generateKey(type, identifier);
+    const maxRequests = config.maxRequests;
+    const windowMs = config.windowMs;
 
-    if (!value) {
-      // 首次请求，创建记录
-      const newRecord: RateLimitRecord = {
-        count: 1,
-        resetTime: now + RATE_LIMIT_CONFIG.global.windowMs,
-      };
-      await kv.set(key, newRecord, { px: RATE_LIMIT_CONFIG.global.windowMs });
-      return {
-        allowed: true,
-        remaining: RATE_LIMIT_CONFIG.global.maxRequests - 1,
-        resetIn: RATE_LIMIT_CONFIG.global.windowMs,
-      };
+    // 原子递增计数
+    const count = await kv.incr(key);
+
+    // 首次递增时设置过期时间
+    if (count === 1) {
+      await kv.pexpire(key, windowMs);
     }
 
-    // 检查是否需要重置
-    if (now >= value.resetTime) {
-      const newRecord: RateLimitRecord = {
-        count: 1,
-        resetTime: now + RATE_LIMIT_CONFIG.global.windowMs,
-      };
-      await kv.set(key, newRecord, { px: RATE_LIMIT_CONFIG.global.windowMs });
-      return {
-        allowed: true,
-        remaining: RATE_LIMIT_CONFIG.global.maxRequests - 1,
-        resetIn: RATE_LIMIT_CONFIG.global.windowMs,
-      };
-    }
+    // 获取剩余时间（毫秒）
+    const ttl = await kv.pttl(key);
+    const resetIn = ttl > 0 ? ttl : windowMs;
 
     // 检查是否超限
-    if (value.count >= RATE_LIMIT_CONFIG.global.maxRequests) {
+    if (count > maxRequests) {
       return {
         allowed: false,
         remaining: 0,
-        resetIn: value.resetTime - now,
+        resetIn,
       };
     }
 
-    // 增加计数
-    const updatedRecord: RateLimitRecord = {
-      count: value.count + 1,
-      resetTime: value.resetTime,
-    };
-    await kv.set(key, updatedRecord, { px: RATE_LIMIT_CONFIG.global.windowMs });
-
     return {
       allowed: true,
-      remaining: RATE_LIMIT_CONFIG.global.maxRequests - value.count - 1,
-      resetIn: value.resetTime - now,
+      remaining: maxRequests - count,
+      resetIn,
     };
   } catch (error) {
-    console.log(`[RateLimit] 检查全局限流失败: ${error}`);
-    return { allowed: true, remaining: RATE_LIMIT_CONFIG.global.maxRequests, resetIn: 0 };
+    const config = type === 'global' ? RATE_LIMIT_CONFIG.global : RATE_LIMIT_CONFIG.ip;
+    console.log(`[RateLimit] 检查${type === 'global' ? '全局' : 'IP'}限流失败: ${error}`);
+    // 错误时拒绝请求，而非放行
+    return { allowed: false, remaining: 0, resetIn: config.windowMs };
   }
 }
 
 /**
+ * 检查全局限流
+ */
+export const checkGlobalRateLimit = () => checkRateLimit('global');
+
+/**
  * 检查 IP 限流
  */
-export async function checkIpRateLimit(ip: string): Promise<{
-  allowed: boolean;
-  remaining: number;
-  resetIn: number;
-}> {
-  try {
-    const kv = await getKV();
-    if (!kv) {
-      return { allowed: true, remaining: RATE_LIMIT_CONFIG.ip.maxRequests, resetIn: 0 };
-    }
-
-    const key = generateKey('ip', ip);
-    const now = Date.now();
-    const value = await kv.get<RateLimitRecord>(key);
-
-    if (!value) {
-      // 首次请求，创建记录
-      const newRecord: RateLimitRecord = {
-        count: 1,
-        resetTime: now + RATE_LIMIT_CONFIG.ip.windowMs,
-      };
-      await kv.set(key, newRecord, { px: RATE_LIMIT_CONFIG.ip.windowMs });
-      return {
-        allowed: true,
-        remaining: RATE_LIMIT_CONFIG.ip.maxRequests - 1,
-        resetIn: RATE_LIMIT_CONFIG.ip.windowMs,
-      };
-    }
-
-    // 检查是否需要重置
-    if (now >= value.resetTime) {
-      const newRecord: RateLimitRecord = {
-        count: 1,
-        resetTime: now + RATE_LIMIT_CONFIG.ip.windowMs,
-      };
-      await kv.set(key, newRecord, { px: RATE_LIMIT_CONFIG.ip.windowMs });
-      return {
-        allowed: true,
-        remaining: RATE_LIMIT_CONFIG.ip.maxRequests - 1,
-        resetIn: RATE_LIMIT_CONFIG.ip.windowMs,
-      };
-    }
-
-    // 检查是否超限
-    if (value.count >= RATE_LIMIT_CONFIG.ip.maxRequests) {
-      return {
-        allowed: false,
-        remaining: 0,
-        resetIn: value.resetTime - now,
-      };
-    }
-
-    // 增加计数
-    const updatedRecord: RateLimitRecord = {
-      count: value.count + 1,
-      resetTime: value.resetTime,
-    };
-    await kv.set(key, updatedRecord, { px: RATE_LIMIT_CONFIG.ip.windowMs });
-
-    return {
-      allowed: true,
-      remaining: RATE_LIMIT_CONFIG.ip.maxRequests - value.count - 1,
-      resetIn: value.resetTime - now,
-    };
-  } catch (error) {
-    console.log(`[RateLimit] 检查 IP 限流失败: ${error}`);
-    return { allowed: true, remaining: RATE_LIMIT_CONFIG.ip.maxRequests, resetIn: 0 };
-  }
-}
+export const checkIpRateLimit = (ip: string) => checkRateLimit('ip', ip);
 
 /**
  * 重置限流
@@ -193,7 +104,7 @@ export async function resetRateLimit(type: 'global' | 'ip', identifier?: string)
 }
 
 /**
- * 获取限流状态
+ * 获取限流状态（适配原子操作存储格式）
  */
 export async function getRateLimitStatus(type: 'global' | 'ip', identifier?: string): Promise<{
   count: number;
@@ -211,10 +122,11 @@ export async function getRateLimitStatus(type: 'global' | 'ip', identifier?: str
     }
 
     const key = generateKey(type, identifier);
-    const value = await kv.get<RateLimitRecord>(key);
-    const now = Date.now();
 
-    if (!value) {
+    // 获取当前计数（原子操作存储的是简单数字）
+    const count = await kv.get<number>(key);
+
+    if (count === null) {
       return {
         count: 0,
         maxRequests: type === 'global' ? RATE_LIMIT_CONFIG.global.maxRequests : RATE_LIMIT_CONFIG.ip.maxRequests,
@@ -222,10 +134,14 @@ export async function getRateLimitStatus(type: 'global' | 'ip', identifier?: str
       };
     }
 
+    // 获取剩余时间（毫秒）
+    const ttl = await kv.pttl(key);
+    const resetIn = ttl > 0 ? ttl : 0;
+
     return {
-      count: value.count,
+      count,
       maxRequests: type === 'global' ? RATE_LIMIT_CONFIG.global.maxRequests : RATE_LIMIT_CONFIG.ip.maxRequests,
-      resetIn: Math.max(0, value.resetTime - now),
+      resetIn,
     };
   } catch (error) {
     console.log(`[RateLimit] 获取限流状态失败: ${error}`);

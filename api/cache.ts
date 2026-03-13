@@ -6,6 +6,8 @@
 /**
  * Cache - 响应缓存（基于 Vercel KV）
  * 对相同 URL 的请求进行缓存，减少重复请求
+ * 
+ * 注意：缓存过期完全依赖 KV 的 TTL 自动过期机制，无需手动清理
  */
 
 import type { ProxyResponse } from "./request-handler.js";
@@ -16,7 +18,6 @@ import { CACHE_CONFIG } from "./config.js";
 interface CacheEntry {
   response: ProxyResponse;
   timestamp: number;
-  expiredAt: number; // 废弃时间戳
 }
 
 /**
@@ -28,6 +29,7 @@ function generateCacheKey(url: string, method: string): string {
 
 /**
  * 获取缓存
+ * 依赖 KV 的 TTL 自动过期机制，无需手动检查过期
  */
 export async function getCachedResponse(
   url: string,
@@ -46,22 +48,6 @@ export async function getCachedResponse(
       return null;
     }
 
-    const now = Date.now();
-
-    // 检查是否已废弃
-    if (now > value.expiredAt) {
-      console.log(`[Cache] 缓存已废弃，删除: ${key}`);
-      await kv.del(key);
-      return null;
-    }
-
-    // 检查是否过期（TTL）
-    if (now - value.timestamp > CACHE_CONFIG.ttl) {
-      console.log(`[Cache] 缓存过期，删除: ${key}`);
-      await kv.del(key);
-      return null;
-    }
-
     console.log(`[Cache] 缓存命中: ${key}`);
     return value.response;
   } catch (error) {
@@ -72,6 +58,7 @@ export async function getCachedResponse(
 
 /**
  * 缓存响应
+ * 使用 KV 的 TTL 自动过期机制
  */
 export async function cacheResponse(
   url: string,
@@ -91,23 +78,21 @@ export async function cacheResponse(
     }
 
     const key = generateCacheKey(url, method);
-    const now = Date.now();
     const entry: CacheEntry = {
       response,
-      timestamp: now,
-      expiredAt: now + CACHE_CONFIG.ttl, // 废弃时间为当前时间 + TTL
+      timestamp: Date.now(),
     };
 
-    // 设置缓存，过期时间为 TTL
+    // 设置缓存，使用 KV 的 TTL 自动过期
     await kv.set(key, entry, { px: CACHE_CONFIG.ttl });
-    console.log(`[Cache] 缓存响应: ${key} (废弃时间: ${new Date(entry.expiredAt).toISOString()})`);
+    console.log(`[Cache] 缓存响应: ${key} (TTL: ${CACHE_CONFIG.ttl}ms)`);
   } catch (error) {
     console.log(`[Cache] 缓存响应失败: ${error}`);
   }
 }
 
 /**
- * 清除缓存
+ * 清除所有缓存
  */
 export async function clearCache(): Promise<void> {
   try {
@@ -166,38 +151,6 @@ export async function getCacheStatus(): Promise<{
       maxSize: CACHE_CONFIG.maxSize,
       ttlMs: CACHE_CONFIG.ttl,
     };
-  }
-}
-
-/**
- * 清理过期缓存
- */
-export async function cleanupCache(): Promise<void> {
-  try {
-    const kv = await getKV();
-    if (!kv) {
-      return;
-    }
-
-    const now = Date.now();
-    let removedCount = 0;
-
-    for await (const key of kv.scanIterator({ match: 'cache:*' })) {
-      const value = await kv.get<CacheEntry>(key);
-      if (value) {
-        // 检查是否已废弃或过期
-        if (now > value.expiredAt || now - value.timestamp > CACHE_CONFIG.ttl) {
-          await kv.del(key);
-          removedCount++;
-        }
-      }
-    }
-
-    if (removedCount > 0) {
-      console.log(`[Cache] 清理了 ${removedCount} 个过期/废弃缓存`);
-    }
-  } catch (error) {
-    console.log(`[Cache] 清理缓存失败: ${error}`);
   }
 }
 

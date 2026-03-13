@@ -15,6 +15,7 @@ import { sendRequestWithMultipleProxies } from "./request-handler.js";
 import type { ProxyRequest } from "./request-handler.js";
 import { initDatabase } from "./database/connection.js";
 import { logger } from "./logger.js";
+import { getHeaderValue } from "./utils/headers.js";
 import {
   compose,
   corsMiddleware,
@@ -22,25 +23,15 @@ import {
   rateLimitMiddleware,
   bodyParserMiddleware,
   urlValidationMiddleware,
+  requestIdMiddleware,
   type MiddlewareContext,
   DEFAULT_CORS_CONFIG,
 } from "./middleware/index.js";
+import { healthCheck, readinessCheck } from "./health.js";
 
 export const config = {
   runtime: "nodejs",
 };
-
-/**
- * 获取请求头值（兼容 Headers 对象和普通对象）
- */
-function getHeaderValue(headers: Headers | Record<string, string>, name: string): string | null {
-  if (headers && typeof headers.get === "function") {
-    return headers.get(name);
-  } else if (headers && (headers as Record<string, string>)[name]) {
-    return (headers as Record<string, string>)[name];
-  }
-  return null;
-}
 
 /**
  * 获取客户端 IP
@@ -102,11 +93,12 @@ async function databaseInitMiddleware(context: MiddlewareContext, next: () => Pr
  * 日志中间件
  */
 async function loggingMiddleware(context: MiddlewareContext, next: () => Promise<void>): Promise<void> {
-  logger.main.verbose("Request received", { clientIp: context.clientIp });
+  const requestId = context.requestId || "unknown";
+  logger.main.verbose("Request received", { clientIp: context.clientIp, requestId });
   const startTime = Date.now();
   await next();
   const duration = Date.now() - startTime;
-  logger.main.verbose("Request completed", { duration: `${duration}ms` });
+  logger.main.verbose("Request completed", { duration: `${duration}ms`, requestId });
 }
 
 /**
@@ -196,6 +188,11 @@ function createJsonResponse(
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, x-api-key",
       "Cache-Control": "no-cache",
+      // 安全响应头
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+      "X-XSS-Protection": "1; mode=block",
     },
   });
 }
@@ -204,32 +201,34 @@ function createJsonResponse(
  * 组合中间件管道
  */
 const pipeline = compose(
-  // 1. 生产环境配置验证
+  // 1. 请求 ID 生成
+  requestIdMiddleware(),
+  // 2. 生产环境配置验证
   productionConfigMiddleware,
-  // 2. 数据库初始化
+  // 3. 数据库初始化
   databaseInitMiddleware,
-  // 3. 日志记录
+  // 4. 日志记录
   loggingMiddleware,
-  // 4. API Key 验证
+  // 5. API Key 验证
   apiKeyMiddleware(API_KEY_CONFIG),
-  // 5. 限流检查
+  // 6. 限流检查
   rateLimitMiddleware({
     enabled: FEATURES.enableRateLimit,
     enableGlobalLimit: true,
     enableIpLimit: true,
   }),
-  // 6. CORS 处理
+  // 7. CORS 处理
   corsMiddleware(DEFAULT_CORS_CONFIG),
-  // 7. 请求体解析
+  // 8. 请求体解析
   bodyParserMiddleware({
     maxSize: SECURITY_CONFIG.maxRequestSize,
     allowedMethods: ["POST"],
   }),
-  // 8. URL 验证
+  // 9. URL 验证
   urlValidationMiddleware(),
-  // 9. 缓存检查
+  // 10. 缓存检查
   cacheMiddleware,
-  // 10. 代理处理
+  // 11. 代理处理
   proxyHandlerMiddleware,
 );
 
@@ -237,6 +236,22 @@ const pipeline = compose(
  * 主处理函数
  */
 export default async function handler(request: Request): Promise<Response> {
+  // 健康检查端点（GET 请求）
+  if (request.method === "GET") {
+    const url = new URL(request.url);
+    if (url.pathname === "/api/health" || url.pathname === "/api") {
+      return healthCheck();
+    }
+    if (url.pathname === "/api/ready") {
+      return readinessCheck();
+    }
+    // 其他 GET 请求返回 404
+    return new Response(JSON.stringify({ error: "Not found", code: "NOT_FOUND" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const context: MiddlewareContext = {
     request,
     clientIp: getClientIp(request),

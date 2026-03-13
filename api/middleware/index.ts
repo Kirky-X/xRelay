@@ -19,3 +19,4 @@ export type { RateLimitConfig } from "./rate-limit.js";
 export { bodyParserMiddleware } from "./body-parser.js";
 export type { BodyParserConfig } from "./body-parser.js";
 export { urlValidationMiddleware } from "./validator.js";
+export { requestIdMiddleware, REQUEST_ID_HEADER } from "./request-id.js";

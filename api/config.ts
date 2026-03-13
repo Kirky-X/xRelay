@@ -108,18 +108,6 @@ export const REQUEST_TIMEOUT_CONFIG = {
   direct: 10000,
 };
 
-// CORS 配置
-export const CORS_CONFIG = {
-  allowedOrigins: [
-    "https://vercel-proxy-shield.vercel.app",
-    "http://localhost:3000",
-    "http://localhost:5173",
-  ],
-  allowedMethods: ["POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-api-key"],
-  maxAge: 86400, // 24小时
-};
-
 // 安全配置
 export const SECURITY_CONFIG = {
   // URL 白名单（防止 SSRF）
@@ -150,6 +138,21 @@ export const SECURITY_CONFIG = {
 export function isProduction(): boolean {
   return process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
 }
+
+// CORS 配置
+export const CORS_CONFIG = {
+  // 生产环境不应包含 localhost
+  allowedOrigins: isProduction()
+    ? ["https://vercel-proxy-shield.vercel.app"]
+    : [
+        "https://vercel-proxy-shield.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:5173",
+      ],
+  allowedMethods: ["POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "x-api-key"],
+  maxAge: 86400, // 24小时
+};
 
 /**
  * 验证生产环境配置

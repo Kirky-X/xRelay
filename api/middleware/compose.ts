@@ -32,12 +32,30 @@ export function compose(...middlewares: Middleware[]): ComposedMiddleware {
       }
       index = i;
 
-      const middleware = middlewares[i];
-      if (!middleware) {
-        return;
+      if (i < middlewares.length) {
+        const middleware = middlewares[i];
+        try {
+          await middleware(context, () => dispatch(i + 1));
+        } catch (error) {
+          // 捕获中间件错误，设置错误响应
+          if (!context.response) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            context.response = new Response(
+              JSON.stringify({
+                error: "Internal server error",
+                code: "MIDDLEWARE_ERROR",
+                message: errorMessage,
+                requestId: context.requestId,
+              }),
+              {
+                status: 500,
+                headers: { "Content-Type": "application/json" },
+              }
+            );
+          }
+          // 不重新抛出，让后续中间件继续执行
+        }
       }
-
-      await middleware(context, () => dispatch(i + 1));
     }
 
     await dispatch(0);

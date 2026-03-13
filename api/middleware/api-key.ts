@@ -3,7 +3,9 @@
  * License: MIT
  */
 
+import { timingSafeEqual as cryptoTimingSafeEqual } from 'crypto';
 import type { Middleware, MiddlewareContext } from "./types.js";
+import { getHeaderValue } from "../utils/headers.js";
 
 /**
  * API Key 配置
@@ -15,21 +17,6 @@ export interface ApiKeyConfig {
 }
 
 /**
- * 获取请求头值（兼容 Headers 对象和普通对象）
- */
-function getHeaderValue(
-  headers: Headers | Record<string, string>,
-  name: string
-): string | null {
-  if (headers && typeof headers.get === "function") {
-    return headers.get(name);
-  } else if (headers && (headers as Record<string, string>)[name]) {
-    return (headers as Record<string, string>)[name];
-  }
-  return null;
-}
-
-/**
  * 验证 API Key
  */
 function validateApiKey(request: Request, config: ApiKeyConfig): boolean {
@@ -38,45 +25,47 @@ function validateApiKey(request: Request, config: ApiKeyConfig): boolean {
     return true;
   }
 
-  // 如果没有配置任何 API Key，直接通过（避免误拦截）
+  // 如果启用了但没有配置任何 API Key，拒绝所有请求
   if (config.keys.length === 0) {
-    return true;
+    console.error('[API Key] API Key verification enabled but no keys configured');
+    return false;
   }
 
-  // 获取请求中的 API Key
   const apiKey = getHeaderValue(request.headers, config.headerName);
-
   if (!apiKey) {
     return false;
   }
 
-  // 使用 constant-time 比较防止时序攻击
-  return config.keys.some((key) => timingSafeEqual(apiKey, key));
+  // 始终检查所有密钥，不使用 some() 提前返回
+  let matched = false;
+  for (const key of config.keys) {
+    if (timingSafeEqual(apiKey, key)) {
+      matched = true;
+      // 不 break，继续比较以保持恒定时间
+    }
+  }
+  return matched;
 }
 
 /**
  * 常量时间字符串比较（防止时序攻击）
- * 使用填充确保无论长度如何都执行相同时间
+ * 优先使用 Node.js 内置的 timingSafeEqual，失败时降级到自定义实现
  */
 function timingSafeEqual(a: string, b: string): boolean {
-  // 使用最大长度进行填充，确保恒定时间
-  const maxLen = Math.max(a.length, b.length, 64); // 至少比较 64 字节
-  
-  // 填充两个字符串到相同长度
-  const paddedA = a.padEnd(maxLen, '\0');
-  const paddedB = b.padEnd(maxLen, '\0');
-  
-  // 恒定时间比较
-  let result = 0;
-  for (let i = 0; i < maxLen; i++) {
-    result |= paddedA.charCodeAt(i) ^ paddedB.charCodeAt(i);
+  try {
+    return cryptoTimingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+  } catch {
+    // 降级方案：使用填充确保无论长度如何都执行相同时间
+    const maxLen = 64;
+    const paddedA = a.padEnd(maxLen, '\0').slice(0, maxLen);
+    const paddedB = b.padEnd(maxLen, '\0').slice(0, maxLen);
+    
+    let result = 0;
+    for (let i = 0; i < maxLen; i++) {
+      result |= paddedA.charCodeAt(i) ^ paddedB.charCodeAt(i);
+    }
+    return result === 0 && a.length === b.length;
   }
-  
-  // 额外检查长度是否相同（但不影响主比较的时间）
-  // 长度检查放在最后，不会泄露长度差异的时间信息
-  result |= (a.length ^ b.length);
-  
-  return result === 0;
 }
 
 /**

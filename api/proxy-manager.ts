@@ -37,6 +37,89 @@ import {
   isProxyDeprecated,
   getAllDeprecatedProxies,
 } from "./database/deprecated-proxies-dao.js";
+import { logger } from "./logger.js";
+
+// 断路器状态接口
+interface CircuitBreakerState {
+  failures: number;
+  lastFailureTime: number;
+  isOpen: boolean;
+}
+
+// 断路器配置
+const CIRCUIT_BREAKER_CONFIG = {
+  failureThreshold: 5, // 失败次数阈值
+  resetTimeout: 60000, // 断路器重置超时时间（1分钟）
+};
+
+// 断路器状态存储
+const circuitBreakers = new Map<string, CircuitBreakerState>();
+
+/**
+ * 检查断路器是否打开
+ * @param proxyKey 代理标识 (ip:port)
+ * @returns true 表示断路器打开（代理不可用），false 表示断路器关闭（代理可用）
+ */
+function isCircuitOpen(proxyKey: string): boolean {
+  const state = circuitBreakers.get(proxyKey);
+  if (!state) return false;
+  
+  if (state.isOpen) {
+    // 检查是否超过重置超时时间（半开状态）
+    if (Date.now() - state.lastFailureTime > CIRCUIT_BREAKER_CONFIG.resetTimeout) {
+      // 半开状态，允许一次尝试
+      state.isOpen = false;
+      logger.proxyManager.info(`断路器进入半开状态: ${proxyKey}`);
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 记录代理失败（断路器）
+ * @param proxyKey 代理标识 (ip:port)
+ */
+function recordFailure(proxyKey: string): void {
+  const state = circuitBreakers.get(proxyKey) || { 
+    failures: 0, 
+    lastFailureTime: 0, 
+    isOpen: false 
+  };
+  
+  state.failures++;
+  state.lastFailureTime = Date.now();
+  
+  if (state.failures >= CIRCUIT_BREAKER_CONFIG.failureThreshold && !state.isOpen) {
+    state.isOpen = true;
+    logger.proxyManager.warn(`断路器打开: ${proxyKey} (失败次数: ${state.failures})`);
+  }
+  
+  circuitBreakers.set(proxyKey, state);
+}
+
+/**
+ * 记录代理成功（重置断路器）
+ * @param proxyKey 代理标识 (ip:port)
+ */
+function recordSuccess(proxyKey: string): void {
+  const state = circuitBreakers.get(proxyKey);
+  if (state) {
+    // 成功后重置断路器状态
+    state.failures = 0;
+    state.isOpen = false;
+    circuitBreakers.set(proxyKey, state);
+    logger.proxyManager.verbose(`断路器重置: ${proxyKey}`);
+  }
+}
+
+/**
+ * 获取断路器状态（用于调试和监控）
+ */
+export function getCircuitBreakerStatus(): Map<string, CircuitBreakerState> {
+  return new Map(circuitBreakers);
+}
 
 // 代理池状态（内存模式）
 interface ProxyPoolState {
@@ -76,23 +159,23 @@ export async function initProxyManager(): Promise<void> {
   // 开始初始化
   initPromise = (async () => {
     try {
-      console.log("[ProxyManager] 初始化代理管理器...");
+      logger.proxyManager.info("初始化代理管理器...");
 
       // 尝试初始化数据库
       const dbInitialized = await initDatabase();
       isDatabaseMode = dbInitialized;
 
       if (isDatabaseMode) {
-        console.log("[ProxyManager] 使用数据库模式");
+        logger.proxyManager.info("使用数据库模式");
         await loadProxiesFromDatabase();
       } else {
-        console.log("[ProxyManager] 使用内存模式");
+        logger.proxyManager.info("使用内存模式");
         await refreshProxyPool();
       }
 
       isInitialized = true;
     } catch (error) {
-      console.error("[ProxyManager] 初始化失败，使用内存模式:", error);
+      logger.proxyManager.error("初始化失败，使用内存模式", { error: error instanceof Error ? error.message : String(error) });
       isDatabaseMode = false;
       await refreshProxyPool();
       isInitialized = true;
@@ -108,16 +191,16 @@ export async function initProxyManager(): Promise<void> {
 async function loadProxiesFromDatabase(): Promise<void> {
   try {
     const count = await getProxyCount();
-    console.log(`[ProxyManager] 数据库中有 ${count} 个代理`);
+    logger.proxyManager.info(`数据库中有 ${count} 个代理`);
 
     if (count === 0) {
-      console.log("[ProxyManager] 数据库为空，从代理池加载...");
+      logger.proxyManager.info("数据库为空，从代理池加载...");
       await loadProxiesFromPool();
     } else {
-      console.log("[ProxyManager] 从数据库加载代理成功");
+      logger.proxyManager.info("从数据库加载代理成功");
     }
   } catch (error) {
-    console.error("[ProxyManager] 从数据库加载代理失败:", error);
+    logger.proxyManager.error("从数据库加载代理失败", { error: error instanceof Error ? error.message : String(error) });
     // 降级到内存模式
     isDatabaseMode = false;
     await refreshProxyPool();
@@ -129,12 +212,12 @@ async function loadProxiesFromDatabase(): Promise<void> {
  */
 async function loadProxiesFromPool(): Promise<void> {
   try {
-    console.log("[ProxyManager] 从代理源获取代理...");
+    logger.proxyManager.info("从代理源获取代理...");
     const allProxies = await fetchAllProxies();
-    console.log(`[ProxyManager] 获取到 ${allProxies.length} 个代理`);
+    logger.proxyManager.info(`获取到 ${allProxies.length} 个代理`);
 
     if (allProxies.length === 0) {
-      console.log("[ProxyManager] 没有获取到代理");
+      logger.proxyManager.warn("没有获取到代理");
       return;
     }
 
@@ -148,8 +231,8 @@ async function loadProxiesFromPool(): Promise<void> {
     const filteredProxies = allProxies.filter(
       (p) => !deprecatedSet.has(`${p.ip}:${p.port}`),
     );
-    console.log(
-      `[ProxyManager] 过滤后剩余 ${filteredProxies.length} 个代理`,
+    logger.proxyManager.info(
+      `过滤后剩余 ${filteredProxies.length} 个代理`,
     );
 
     // 批量插入数据库
@@ -162,9 +245,9 @@ async function loadProxiesFromPool(): Promise<void> {
     }));
 
     await batchInsertProxies(proxiesToInsert);
-    console.log(`[ProxyManager] 成功插入 ${proxiesToInsert.length} 个代理`);
+    logger.proxyManager.info(`成功插入 ${proxiesToInsert.length} 个代理`);
   } catch (error) {
-    console.error("[ProxyManager] 从代理池加载失败:", error);
+    logger.proxyManager.error("从代理池加载失败", { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -189,27 +272,35 @@ async function getAvailableProxyFromDatabase(): Promise<ProxyInfo | null> {
   // 检查是否需要补充代理
   const count = await getProxyCount();
   if (count < DATABASE_CONFIG.minProxyCount) {
-    console.log(
-      `[ProxyManager] 代理数量不足 (${count} < ${DATABASE_CONFIG.minProxyCount})，补充代理...`,
+    logger.proxyManager.info(
+      `代理数量不足 (${count} < ${DATABASE_CONFIG.minProxyCount})，补充代理...`,
     );
     await loadProxiesFromPool();
   }
 
-  // 获取带权重的代理
-  const proxies = await getWeightedProxies(1);
+  // 获取带权重的代理（获取更多候选，以便过滤断路器打开的代理）
+  const proxies = await getWeightedProxies(10);
   if (proxies.length === 0) {
-    console.log("[ProxyManager] 没有可用代理");
+    logger.proxyManager.warn("没有可用代理");
     return null;
   }
 
-  const proxy = proxies[0];
-  console.log(`[ProxyManager] 获取代理: ${proxy.ip}:***`);
-  return {
-    ip: proxy.ip,
-    port: proxy.port.toString(),
-    source: proxy.source,
-    timestamp: Date.now(),
-  };
+  // 找到第一个断路器未打开的代理
+  for (const proxy of proxies) {
+    const proxyKey = `${proxy.ip}:${proxy.port}`;
+    if (!isCircuitOpen(proxyKey)) {
+      logger.proxyManager.verbose(`获取代理: ${proxy.ip}:***`);
+      return {
+        ip: proxy.ip,
+        port: proxy.port.toString(),
+        source: proxy.source,
+        timestamp: Date.now(),
+      };
+    }
+  }
+
+  logger.proxyManager.warn("所有代理的断路器都已打开");
+  return null;
 }
 
 /**
@@ -226,17 +317,28 @@ async function getAvailableProxyFromMemory(): Promise<ProxyInfo | null> {
   // 清理黑名单
   cleanupBlacklist();
 
-  // 返回随机可用代理
+  // 返回随机可用代理（跳过断路器打开的代理）
   if (proxyPool.availableProxies.length > 0) {
-    const proxy =
-      proxyPool.availableProxies[
-        Math.floor(Math.random() * proxyPool.availableProxies.length)
-      ];
-    console.log(`[ProxyManager] 获取代理: ${proxy.ip}:***`);
-    return proxy;
+    // 过滤断路器打开的代理
+    const availableProxies = proxyPool.availableProxies.filter(proxy => {
+      const proxyKey = `${proxy.ip}:${proxy.port}`;
+      return !isCircuitOpen(proxyKey);
+    });
+
+    if (availableProxies.length > 0) {
+      const proxy =
+        availableProxies[
+          Math.floor(Math.random() * availableProxies.length)
+        ];
+      logger.proxyManager.verbose(`获取代理: ${proxy.ip}:***`);
+      return proxy;
+    }
+
+    logger.proxyManager.warn("所有代理的断路器都已打开");
+    return null;
   }
 
-  console.log(`[ProxyManager] 没有可用代理`);
+  logger.proxyManager.warn(`没有可用代理`);
   return null;
 }
 
@@ -263,15 +365,22 @@ async function getMultipleProxiesFromDatabase(
   // 检查是否需要补充代理
   const dbCount = await getProxyCount();
   if (dbCount < DATABASE_CONFIG.minProxyCount) {
-    console.log(
-      `[ProxyManager] 代理数量不足 (${dbCount} < ${DATABASE_CONFIG.minProxyCount})，补充代理...`,
+    logger.proxyManager.info(
+      `代理数量不足 (${dbCount} < ${DATABASE_CONFIG.minProxyCount})，补充代理...`,
     );
     await loadProxiesFromPool();
   }
 
-  // 获取带权重的代理
-  const proxies = await getWeightedProxies(count);
-  return proxies.map((p) => ({
+  // 获取带权重的代理（获取更多候选，以便过滤断路器打开的代理）
+  const proxies = await getWeightedProxies(count * 3);
+  
+  // 过滤断路器打开的代理
+  const availableProxies = proxies.filter(p => {
+    const proxyKey = `${p.ip}:${p.port}`;
+    return !isCircuitOpen(proxyKey);
+  });
+
+  return availableProxies.slice(0, count).map((p) => ({
     ip: p.ip,
     port: p.port.toString(),
     source: p.source,
@@ -287,8 +396,14 @@ async function getMultipleProxiesFromMemory(count: number): Promise<ProxyInfo[]>
     await refreshProxyPool();
   }
 
+  // 过滤断路器打开的代理
+  const availableProxies = proxyPool.availableProxies.filter(proxy => {
+    const proxyKey = `${proxy.ip}:${proxy.port}`;
+    return !isCircuitOpen(proxyKey);
+  });
+
   // 随机选择指定数量的代理
-  const shuffled = [...proxyPool.availableProxies];
+  const shuffled = [...availableProxies];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
@@ -301,6 +416,10 @@ async function getMultipleProxiesFromMemory(count: number): Promise<ProxyInfo[]>
  * 报告代理失效
  */
 export async function reportProxyFailed(proxy: ProxyInfo): Promise<void> {
+  // 更新断路器状态
+  const proxyKey = `${proxy.ip}:${proxy.port}`;
+  recordFailure(proxyKey);
+
   if (isDatabaseMode) {
     await reportProxyFailedToDatabase(proxy);
   } else {
@@ -356,9 +475,9 @@ function reportProxyFailedToMemory(proxy: ProxyInfo): void {
   proxyPool.availableProxies = proxyPool.availableProxies.filter(
     (p) => `${p.ip}:${p.port}` !== `${proxy.ip}:${proxy.port}`,
   );
-  console.log(`[ProxyManager] 代理失效，已从池中移除: ${proxy.ip}:***`);
-  console.log(
-    `[ProxyManager] 池中剩余代理: ${proxyPool.availableProxies.length}`,
+  logger.proxyManager.verbose(`代理失效，已从池中移除: ${proxy.ip}:***`);
+  logger.proxyManager.verbose(
+    `池中剩余代理: ${proxyPool.availableProxies.length}`,
   );
 }
 
@@ -366,6 +485,10 @@ function reportProxyFailedToMemory(proxy: ProxyInfo): void {
  * 报告代理成功
  */
 export async function reportProxySuccess(proxy: ProxyInfo): Promise<void> {
+  // 重置断路器状态
+  const proxyKey = `${proxy.ip}:${proxy.port}`;
+  recordSuccess(proxyKey);
+
   if (isDatabaseMode) {
     await reportProxySuccessToDatabase(proxy);
   } else {
@@ -379,9 +502,9 @@ export async function reportProxySuccess(proxy: ProxyInfo): Promise<void> {
 async function reportProxySuccessToDatabase(proxy: ProxyInfo): Promise<void> {
   try {
     await incrementSuccessCount(proxy.ip, parseInt(proxy.port, 10));
-    console.log(`[ProxyManager] 代理成功: ${proxy.ip}:***`);
+    logger.proxyManager.verbose(`代理成功: ${proxy.ip}:***`);
   } catch (error) {
-    console.error("[ProxyManager] 报告代理成功失败:", error);
+    logger.proxyManager.error("报告代理成功失败", { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -397,15 +520,15 @@ function reportProxySuccessToMemory(_proxy: ProxyInfo): void {
  * 刷新代理池（内存模式）
  */
 async function refreshProxyPool(): Promise<void> {
-  console.log(`[ProxyManager] 刷新代理池...`);
+  logger.proxyManager.info(`刷新代理池...`);
 
   try {
     // 1. 获取最新代理列表
     const allProxies = await fetchAllProxies();
-    console.log(`[ProxyManager] 获取到 ${allProxies.length} 个代理`);
+    logger.proxyManager.info(`获取到 ${allProxies.length} 个代理`);
 
     if (allProxies.length === 0) {
-      console.log(`[ProxyManager] 没有获取到代理`);
+      logger.proxyManager.warn(`没有获取到代理`);
       return;
     }
 
@@ -423,11 +546,11 @@ async function refreshProxyPool(): Promise<void> {
     proxyPool.lastRefreshTime = Date.now();
     proxyPool.refreshCount++;
 
-    console.log(
-      `[ProxyManager] 代理池刷新完成，可用代理: ${proxyPool.availableProxies.length}`,
+    logger.proxyManager.info(
+      `代理池刷新完成，可用代理: ${proxyPool.availableProxies.length}`,
     );
   } catch (error) {
-    console.error(`[ProxyManager] 刷新代理池失败:`, error);
+    logger.proxyManager.error(`刷新代理池失败`, { error: error instanceof Error ? error.message : String(error) });
   }
 }
 

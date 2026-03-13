@@ -5,6 +5,7 @@
 
 import type { Middleware, MiddlewareContext } from "./types.js";
 import { CORS_CONFIG } from "../config.js";
+import { getHeaderValue } from "../utils/headers.js";
 
 /**
  * CORS 配置类型
@@ -20,21 +21,6 @@ export interface CorsConfig {
  * 使用统一配置作为默认值
  */
 export const DEFAULT_CORS_CONFIG: CorsConfig = CORS_CONFIG;
-
-/**
- * 获取请求头值（兼容 Headers 对象和普通对象）
- */
-function getHeaderValue(
-  headers: Headers | Record<string, string>,
-  name: string
-): string | null {
-  if (headers && typeof headers.get === "function") {
-    return headers.get(name);
-  } else if (headers && (headers as Record<string, string>)[name]) {
-    return (headers as Record<string, string>)[name];
-  }
-  return null;
-}
 
 /**
  * 获取允许的 CORS origin

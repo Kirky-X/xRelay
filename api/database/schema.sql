@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS xrelay.available_proxies (
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_available_proxies_failure_count ON xrelay.available_proxies(failure_count);
 CREATE INDEX IF NOT EXISTS idx_available_proxies_last_used ON xrelay.available_proxies(last_used_at);
-CREATE INDEX IF NOT EXISTS idx_available_proxies_ip_port ON xrelay.available_proxies(ip, port);
+-- 为权重查询添加复合索引（优化代理选择性能）
+CREATE INDEX IF NOT EXISTS idx_proxies_success_failure ON xrelay.available_proxies(success_count, failure_count);
 
 -- 废弃代理表
 CREATE TABLE IF NOT EXISTS xrelay.deprecated_proxies (
@@ -47,6 +48,8 @@ CREATE TABLE IF NOT EXISTS xrelay.deprecated_proxies (
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_deprecated_proxies_deprecated_at ON xrelay.deprecated_proxies(deprecated_at);
 CREATE INDEX IF NOT EXISTS idx_deprecated_proxies_ip_port ON xrelay.deprecated_proxies(ip, port);
+-- 为废弃代理表添加创建时间索引
+CREATE INDEX IF NOT EXISTS idx_deprecated_created_at ON xrelay.deprecated_proxies(created_at);
 
 -- 添加注释
 COMMENT ON SCHEMA xrelay IS 'xRelay 代理数据库 schema';

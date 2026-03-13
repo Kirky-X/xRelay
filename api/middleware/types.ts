@@ -17,6 +17,7 @@ export interface MiddlewareContext {
   startTime: number;
   body?: RequestBody;
   state: Record<string, unknown>;
+  requestId?: string;
 }
 
 /**

@@ -16,6 +16,9 @@ import {
   insertDeprecatedProxy,
 } from "./database/deprecated-proxies-dao.js";
 
+// 代理黑名单最大容量
+const MAX_BLACKLIST_SIZE = 1000;
+
 // 代理黑名单（失败的代理，内存模式）
 const failedProxyBlacklist = new Map<string, number>();
 
@@ -239,6 +242,16 @@ export async function checkProxyReachability(proxy: ProxyInfo): Promise<{
 }
 
 /**
+ * 删除最旧条目的辅助函数
+ */
+function evictOldestBlacklistEntry(): void {
+  const firstKey = failedProxyBlacklist.keys().next().value;
+  if (firstKey !== undefined) {
+    failedProxyBlacklist.delete(firstKey);
+  }
+}
+
+/**
  * 标记代理为失败
  */
 function markProxyAsFailed(proxy: ProxyInfo): void {
@@ -246,6 +259,10 @@ function markProxyAsFailed(proxy: ProxyInfo): void {
 
   // 如果使用数据库模式，不需要内存黑名单
   if (!isDatabaseReady()) {
+    // 检查大小限制，超过则删除最旧的条目
+    if (failedProxyBlacklist.size >= MAX_BLACKLIST_SIZE) {
+      evictOldestBlacklistEntry();
+    }
     failedProxyBlacklist.set(
       key,
       Date.now() + PROXY_TEST_CONFIG.blacklistDuration,

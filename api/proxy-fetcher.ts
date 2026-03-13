@@ -10,6 +10,7 @@
 
 import { PROXY_CONFIG, REQUEST_TIMEOUT_CONFIG } from "./config.js";
 import { validateProxyInfo, validateProxySource } from "./security.js";
+import { logger } from "./logger.js";
 
 // 代理源配置
 const PROXY_SOURCES = [
@@ -117,8 +118,8 @@ export async function fetchAllProxies(): Promise<ProxyInfo[]> {
     cachedProxies.length > 0 &&
     now - lastFetchTime < PROXY_CONFIG.pool.refreshInterval
   ) {
-    console.log(
-      `[ProxyFetcher] 使用缓存的代理列表，共 ${cachedProxies.length} 个`,
+    logger.proxyFetcher.verbose(
+      `使用缓存的代理列表，共 ${cachedProxies.length} 个`,
     );
     return cachedProxies;
   }
@@ -129,12 +130,12 @@ export async function fetchAllProxies(): Promise<ProxyInfo[]> {
   const fetchPromises = PROXY_SOURCES.map(async (source) => {
     try {
       const proxies = await fetchFromSource(source);
-      console.log(
-        `[ProxyFetcher] 从 ${source.name} 获取了 ${proxies.length} 个代理`,
+      logger.proxyFetcher.verbose(
+        `从 ${source.name} 获取了 ${proxies.length} 个代理`,
       );
       return proxies;
     } catch (error) {
-      console.error(`[ProxyFetcher] 从 ${source.name} 获取失败:`, error);
+      logger.proxyFetcher.error(`从 ${source.name} 获取失败`, { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   });
@@ -153,7 +154,7 @@ export async function fetchAllProxies(): Promise<ProxyInfo[]> {
   cachedProxies = uniqueProxies;
   lastFetchTime = now;
 
-  console.log(`[ProxyFetcher] 总共获取 ${uniqueProxies.length} 个唯一代理`);
+  logger.proxyFetcher.info(`总共获取 ${uniqueProxies.length} 个唯一代理`);
 
   return uniqueProxies;
 }
@@ -190,7 +191,7 @@ async function fetchFromSource(
       .map((proxy) => {
         const parts = proxy.split(":");
         if (parts.length < 2) {
-          console.warn(`[ProxyFetcher] 无效的代理格式: ${proxy}`);
+          logger.proxyFetcher.warn(`无效的代理格式: ${proxy}`);
           return null;
         }
         const [ip, port] = parts;
@@ -198,7 +199,7 @@ async function fetchFromSource(
         // 验证代理信息
         const validation = validateProxyInfo(ip, port);
         if (!validation.valid) {
-          console.warn(`[ProxyFetcher] 无效的代理 ${proxy}: ${validation.error}`);
+          logger.proxyFetcher.warn(`无效的代理 ${proxy}: ${validation.error}`);
           return null;
         }
         
@@ -216,7 +217,7 @@ async function fetchFromSource(
       .filter((p): p is ProxyInfo => p !== null);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      console.warn(`[ProxyFetcher] 获取超时: ${source.name}`);
+      logger.proxyFetcher.warn(`获取超时: ${source.name}`);
     }
     throw error;
   }

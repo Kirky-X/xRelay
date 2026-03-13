@@ -14,7 +14,6 @@ import {
   cacheResponse,
   clearCache,
   getCacheStatus,
-  cleanupCache,
   invalidateCache,
 } from '../cache';
 import { checkGlobalRateLimit, checkIpRateLimit, resetRateLimit } from '../rate-limiter';

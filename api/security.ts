@@ -9,6 +9,7 @@
  */
 
 import { SECURITY_CONFIG } from "./config.js";
+import { logger } from "./logger.js";
 
 /**
  * 将 IPv6 映射地址转换为 IPv4 地址
@@ -86,139 +87,254 @@ function isBlockedPrivateIP(a: number, b: number, c: number, d: number): { block
 }
 
 /**
+ * 验证协议是否允许
+ * @param url 解析后的 URL 对象
+ * @returns 验证结果
+ */
+export function validateProtocol(url: URL): { valid: boolean; error?: string } {
+  if (!SECURITY_CONFIG.allowedProtocols.includes(url.protocol)) {
+    return {
+      valid: false,
+      error: `Protocol not allowed: ${url.protocol}`,
+    };
+  }
+  return { valid: true };
+}
+
+/**
+ * 验证域名是否在白名单中
+ * @param url 解析后的 URL 对象
+ * @returns 验证结果
+ */
+export function validateDomainWhitelist(url: URL): { valid: boolean; error?: string } {
+  if (SECURITY_CONFIG.allowedDomains.length > 0) {
+    if (!SECURITY_CONFIG.allowedDomains.includes(url.hostname)) {
+      return {
+        valid: false,
+        error: `Domain not allowed: ${url.hostname}`,
+      };
+    }
+  }
+  return { valid: true };
+}
+
+/**
+ * 验证 IPv4 地址是否为被阻止的私有地址
+ * @param hostname 主机名（已标准化）
+ * @returns 验证结果
+ */
+export function validateIPv4Address(hostname: string): { valid: boolean; error?: string } {
+  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+
+  if (!ipv4Match) {
+    return { valid: true }; // 不是 IPv4 地址，继续其他验证
+  }
+
+  const [, a, b, c, d] = ipv4Match.map(Number);
+
+  // 检查每个部分是否在 0-255 范围内
+  if (a > 255 || b > 255 || c > 255 || d > 255) {
+    return { valid: false, error: "Invalid IPv4 address" };
+  }
+
+  const result = isBlockedPrivateIP(a, b, c, d);
+  if (result.blocked) {
+    return { valid: false, error: result.reason };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * 验证 IPv6 地址是否为被阻止的私有地址
+ * @param hostname 主机名（已标准化）
+ * @returns 验证结果
+ */
+export function validateIPv6Address(hostname: string): { valid: boolean; error?: string } {
+  if (!hostname.includes(":")) {
+    return { valid: true }; // 不是 IPv6 地址，继续其他验证
+  }
+
+  // 移除方括号（URL 中的 IPv6 地址格式为 [::1]）
+  const ipv6Address = hostname.replace(/^\[|\]$/g, "");
+
+  // :: (未指定地址)
+  if (ipv6Address === "::" || ipv6Address === "::0") {
+    return { valid: false, error: "Unspecified address not allowed" };
+  }
+
+  // ::1 (loopback)
+  if (ipv6Address === "::1") {
+    return { valid: false, error: "IPv6 loopback not allowed" };
+  }
+
+  // fc00::/7 (private)
+  if (ipv6Address.startsWith("fc") || ipv6Address.startsWith("fd")) {
+    return { valid: false, error: "IPv6 private network not allowed" };
+  }
+
+  // fe80::/10 (link-local)
+  if (
+    ipv6Address.startsWith("fe") &&
+    (ipv6Address[2] === "8" ||
+      ipv6Address[2] === "9" ||
+      ipv6Address[2] === "a" ||
+      ipv6Address[2] === "b")
+  ) {
+    return { valid: false, error: "IPv6 link-local not allowed" };
+  }
+
+  // ff00::/8 (multicast)
+  if (ipv6Address.toLowerCase().startsWith("ff")) {
+    return { valid: false, error: "IPv6 multicast address not allowed" };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * 验证是否为 localhost
+ * @param hostname 主机名
+ * @returns 验证结果
+ */
+export function validateLocalhost(hostname: string): { valid: boolean; error?: string } {
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    return { valid: false, error: "Localhost not allowed" };
+  }
+  return { valid: true };
+}
+
+/**
  * 验证 URL 是否安全（防止 SSRF）
  * 
  * 注意：此函数仅进行静态 URL 分析。对于更严格的 SSRF 防护，
  * 建议在 DNS 解析后再次验证解析后的 IP 地址，以防止 DNS 重绑定攻击。
  */
 export function validateUrl(url: string): { valid: boolean; error?: string } {
+  // 检查 URL 中是否包含控制字符（防止 CRLF 注入和其他注入攻击）
+  const controlCharPattern = /[\x00-\x1F\x7F]/;
+  if (controlCharPattern.test(url)) {
+    return { valid: false, error: "URL contains control characters" };
+  }
+
+  let parsedUrl: URL;
+
   try {
-    const parsedUrl = new URL(url);
-
-    // 检查协议
-    if (!SECURITY_CONFIG.allowedProtocols.includes(parsedUrl.protocol)) {
-      return {
-        valid: false,
-        error: `Protocol not allowed: ${parsedUrl.protocol}`,
-      };
-    }
-
-    // 检查域名白名单（如果配置了）
-    if (SECURITY_CONFIG.allowedDomains.length > 0) {
-      if (!SECURITY_CONFIG.allowedDomains.includes(parsedUrl.hostname)) {
-        return {
-          valid: false,
-          error: `Domain not allowed: ${parsedUrl.hostname}`,
-        };
-      }
-    }
-
-    // 检查是否为内网地址
-    let hostname = parsedUrl.hostname;
-
-    // 移除 IPv6 地址的方括号
-    hostname = hostname.replace(/^\[|\]$/g, "");
-
-    // 处理 IPv6 映射地址
-    hostname = normalizeIPv6Mapping(hostname);
-
-    // IPv4 检查
-    const ipv4Match = hostname.match(
-      /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/,
-    );
-    if (ipv4Match) {
-      const [, a, b, c, d] = ipv4Match.map(Number);
-
-      // 检查每个部分是否在 0-255 范围内
-      if (a > 255 || b > 255 || c > 255 || d > 255) {
-        return { valid: false, error: "Invalid IPv4 address" };
-      }
-
-      const result = isBlockedPrivateIP(a, b, c, d);
-      if (result.blocked) {
-        return { valid: false, error: result.reason };
-      }
-    }
-
-    // IPv6 检查
-    if (hostname.includes(":")) {
-      // 移除方括号（URL 中的 IPv6 地址格式为 [::1]）
-      const ipv6Address = hostname.replace(/^\[|\]$/g, "");
-
-      // :: (未指定地址)
-      if (ipv6Address === "::" || ipv6Address === "::0") {
-        return { valid: false, error: "Unspecified address not allowed" };
-      }
-      // ::1 (loopback)
-      if (ipv6Address === "::1") {
-        return { valid: false, error: "IPv6 loopback not allowed" };
-      }
-      // fc00::/7 (private)
-      if (ipv6Address.startsWith("fc") || ipv6Address.startsWith("fd")) {
-        return { valid: false, error: "IPv6 private network not allowed" };
-      }
-      // fe80::/10 (link-local)
-      if (
-        ipv6Address.startsWith("fe") &&
-        (ipv6Address[2] === "8" ||
-          ipv6Address[2] === "9" ||
-          ipv6Address[2] === "a" ||
-          ipv6Address[2] === "b")
-      ) {
-        return { valid: false, error: "IPv6 link-local not allowed" };
-      }
-    }
-
-    // 检查 localhost
-    if (hostname === "localhost" || hostname.endsWith(".localhost")) {
-      return { valid: false, error: "Localhost not allowed" };
-    }
-
-    return { valid: true };
+    parsedUrl = new URL(url);
   } catch (error) {
     return {
       valid: false,
       error: error instanceof Error ? error.message : "Invalid URL",
     };
   }
+
+  // 1. 验证协议
+  const protocolResult = validateProtocol(parsedUrl);
+  if (!protocolResult.valid) {
+    return protocolResult;
+  }
+
+  // 2. 验证域名白名单
+  const domainResult = validateDomainWhitelist(parsedUrl);
+  if (!domainResult.valid) {
+    return domainResult;
+  }
+
+  // 3. 标准化主机名
+  let hostname = parsedUrl.hostname;
+  hostname = hostname.replace(/^\[|\]$/g, ""); // 移除 IPv6 地址的方括号
+  hostname = normalizeIPv6Mapping(hostname); // 处理 IPv6 映射地址
+
+  // 4. 验证 IPv4 地址
+  const ipv4Result = validateIPv4Address(hostname);
+  if (!ipv4Result.valid) {
+    return ipv4Result;
+  }
+
+  // 5. 验证 IPv6 地址
+  const ipv6Result = validateIPv6Address(hostname);
+  if (!ipv6Result.valid) {
+    return ipv6Result;
+  }
+
+  // 6. 验证 localhost
+  const localhostResult = validateLocalhost(hostname);
+  if (!localhostResult.valid) {
+    return localhostResult;
+  }
+
+  return { valid: true };
 }
 
 /**
  * 验证是否为有效的公网 IP
+ * 支持 IPv4 和 IPv6 地址验证
  */
 export function isValidPublicIp(ip: string): boolean {
   // 处理 IPv6 映射地址
   ip = normalizeIPv6Mapping(ip);
-  
-  // 简单的 IPv4 验证
+
+  // IPv4 验证
   const ipv4Match = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!ipv4Match) return false;
+  if (ipv4Match) {
+    const [, a, b, c, d] = ipv4Match.map(Number);
+    if (a > 255 || b > 255 || c > 255 || d > 255) return false;
 
-  const [, a, b, c, d] = ipv4Match.map(Number);
-  if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+    const ipNum = ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
 
-  // 使用无符号右移避免 32 位有符号整数问题
-  const ipNum = ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
+    // 排除内网地址
+    if ((ipNum & 0xff000000) >>> 0 === 0x00000000) return false; // 0.0.0.0/8 (Reserved)
+    if ((ipNum & 0xff000000) >>> 0 === 0x7f000000) return false; // 127.0.0.0/8 (Loopback)
+    if ((ipNum & 0xff000000) >>> 0 === 0x0a000000) return false; // 10.0.0.0/8 (Private A)
+    if ((ipNum & 0xfff00000) >>> 0 === 0xac100000) return false; // 172.16.0.0/12 (Private B)
+    if ((ipNum & 0xffff0000) >>> 0 === 0xc0a80000) return false; // 192.168.0.0/16 (Private C)
+    if ((ipNum & 0xffff0000) >>> 0 === 0xa9fe0000) return false; // 169.254.0.0/16 (Link-local)
+    if ((ipNum & 0xf0000000) >>> 0 === 0xe0000000) return false; // 224.0.0.0/4 (Multicast)
+    if ((ipNum & 0xf0000000) >>> 0 === 0xf0000000) return false; // 240.0.0.0/4 (Reserved)
 
-  // 排除内网地址
-  if ((ipNum & 0xff000000) >>> 0 === 0x00000000) return false; // 0.0.0.0/8 (Reserved)
-  if ((ipNum & 0xff000000) >>> 0 === 0x7f000000) return false; // 127.0.0.0/8 (Loopback)
-  if ((ipNum & 0xff000000) >>> 0 === 0x0a000000) return false; // 10.0.0.0/8 (Private A)
-  if ((ipNum & 0xfff00000) >>> 0 === 0xac100000) return false; // 172.16.0.0/12 (Private B)
-  if ((ipNum & 0xffff0000) >>> 0 === 0xc0a80000) return false; // 192.168.0.0/16 (Private C)
-  if ((ipNum & 0xffff0000) >>> 0 === 0xa9fe0000) return false; // 169.254.0.0/16 (Link-local)
-  if ((ipNum & 0xf0000000) >>> 0 === 0xe0000000) return false; // 224.0.0.0/4 (Multicast)
-  if ((ipNum & 0xf0000000) >>> 0 === 0xf0000000) return false; // 240.0.0.0/4 (Reserved)
+    return true;
+  }
 
-  return true;
+  // IPv6 验证
+  if (ip.includes(':')) {
+    const ipv6 = ip.replace(/^\[|\]$/g, '').toLowerCase();
+
+    // 未指定地址 :: 或 ::0
+    if (ipv6 === '::' || ipv6 === '::0') return false;
+    // Loopback ::1
+    if (ipv6 === '::1') return false;
+    // 唯一本地地址 fc00::/7 (fc00::/8 和 fd00::/8)
+    if (ipv6.startsWith('fc') || ipv6.startsWith('fd')) return false;
+    // 链路本地地址 fe80::/10
+    if (/^fe[89ab]/.test(ipv6)) return false;
+    // 多播地址 ff00::/8
+    if (ipv6.startsWith('ff')) return false;
+    // IPv4 映射地址 (已通过 normalizeIPv6Mapping 处理，但再次检查以防遗漏)
+    if (ipv6.includes('::ffff:')) return false;
+
+    return true;
+  }
+
+  return false;
 }
 
 /**
  * DNS 解析结果缓存
  * 用于防止 DNS 重绑定攻击
  */
+const MAX_DNS_CACHE_SIZE = 500;
 const dnsCache = new Map<string, { ips: string[]; timestamp: number }>();
 const DNS_CACHE_TTL = 60 * 1000; // 60 秒缓存
+
+/**
+ * 删除最旧缓存条目的辅助函数
+ */
+function evictOldestDnsCacheEntry(): void {
+  const firstKey = dnsCache.keys().next().value;
+  if (firstKey !== undefined) {
+    dnsCache.delete(firstKey);
+  }
+}
 
 /**
  * 使用 DNS-over-HTTPS 解析域名
@@ -260,12 +376,16 @@ export async function resolveDns(hostname: string): Promise<string[]> {
     const data = await response.json() as { Answer?: { data: string }[] };
     const ips = data.Answer?.map(a => a.data).filter(Boolean) || [];
 
+    // 检查缓存大小限制，超过则删除最旧的条目
+    if (dnsCache.size >= MAX_DNS_CACHE_SIZE) {
+      evictOldestDnsCacheEntry();
+    }
     // 缓存结果
     dnsCache.set(hostname, { ips, timestamp: Date.now() });
 
     return ips;
   } catch (error) {
-    console.error(`[Security] DNS resolution failed for ${hostname}:`, error);
+    logger.security.error(`DNS 解析失败: ${hostname}`, { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }
@@ -334,7 +454,7 @@ export function validateProxyPort(port: string | number): { valid: boolean; port
   
   // 警告：特权端口通常不应作为代理端口
   if (portNum < 1024) {
-    console.warn(`[Security] Warning: Port ${portNum} is a privileged port, which is unusual for proxy services`);
+    logger.security.warn(`端口号 ${portNum} 是特权端口，通常不应用作代理端口`);
   }
   
   return { valid: true, port: portNum };
