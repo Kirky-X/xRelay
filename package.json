@@ -1,6 +1,6 @@
 {
   "name": "xrelay",
-  "version": "1.0.0",
+  "version": "0.1.1",
   "description": "Vercel Edge Function proxy with free proxy pool and fallback",
   "main": "api/index.ts",
   "type": "module",
