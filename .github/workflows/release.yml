@@ -1,0 +1,256 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  NODE_ENV: production
+  CI: true
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.version }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION. Expected format: v1.0.0 or v1.0.0-beta.1"
+            exit 1
+          fi
+          
+          echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Release version: $VERSION"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Verify package.json version matches tag
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          
+          if [[ "$PACKAGE_VERSION" != "$TAG_VERSION" ]]; then
+            echo "::warning::Package.json version ($PACKAGE_VERSION) does not match tag version ($TAG_VERSION)"
+          fi
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Run TypeScript type check
+        run: npx tsc --noEmit --project config/tsconfig.json
+
+      - name: Run tests
+        run: npm run test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [validate, test]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Build project
+        run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build
+          path: |
+            dist/
+          retention-days: 30
+
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    needs: [validate, build]
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          CURRENT_TAG="${{ needs.validate.outputs.tag }}"
+          
+          echo "## 🚀 Release ${CURRENT_TAG}" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            echo "### Changes since ${PREVIOUS_TAG}" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            
+            git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges >> CHANGELOG.md || true
+          else
+            echo "### Initial Release" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            git log --pretty=format:"- %s (%h)" --no-merges -20 >> CHANGELOG.md || true
+          fi
+          
+          echo "" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "### 📦 What's Changed" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          
+          FEATURES=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"%s" --no-merges | grep -i "feat\|feature" | wc -l || echo "0")
+          FIXES=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"%s" --no-merges | grep -i "fix\|bug" | wc -l || echo "0")
+          REFACTOR=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"%s" --no-merges | grep -i "refactor" | wc -l || echo "0")
+          
+          echo "- ✨ **New Features**: ${FEATURES}" >> CHANGELOG.md
+          echo "- 🐛 **Bug Fixes**: ${FIXES}" >> CHANGELOG.md
+          echo "- ♻️ **Refactoring**: ${REFACTOR}" >> CHANGELOG.md
+          
+          CHANGELOG_CONTENT=$(cat CHANGELOG.md)
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload changelog
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: CHANGELOG.md
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate, build, changelog]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-build
+          path: dist/
+
+      - name: Download changelog
+        uses: actions/download-artifact@v4
+        with:
+          name: changelog
+          path: .
+
+      - name: Create release archive
+        run: |
+          tar -czvf xrelay-${{ needs.validate.outputs.version }}.tar.gz -C dist .
+          zip -r xrelay-${{ needs.validate.outputs.version }}.zip dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: Release ${{ needs.validate.outputs.tag }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: ${{ contains(needs.validate.outputs.tag, '-') }}
+          files: |
+            xrelay-${{ needs.validate.outputs.version }}.tar.gz
+            xrelay-${{ needs.validate.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    name: Deploy to Vercel
+    runs-on: ubuntu-latest
+    needs: [validate, release]
+    if: ${{ !contains(needs.validate.outputs.tag, '-') }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Deploy to Vercel (Production)
+        run: |
+          if [[ -n "${{ secrets.VERCEL_TOKEN }}" ]]; then
+            npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
+            echo "✅ Deployed to Vercel Production"
+          else
+            echo "::warning::VERCEL_TOKEN not set, skipping deployment"
+          fi
+
+  notify:
+    name: Notify Release
+    runs-on: ubuntu-latest
+    needs: [validate, release]
+    if: always()
+    steps:
+      - name: Release Summary
+        run: |
+          echo "## 🚀 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ needs.validate.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release**: [View on GitHub](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate.outputs.tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

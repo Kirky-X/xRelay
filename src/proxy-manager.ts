@@ -50,10 +50,40 @@ interface CircuitBreakerState {
 const CIRCUIT_BREAKER_CONFIG = {
   failureThreshold: 5, // 失败次数阈值
   resetTimeout: 60000, // 断路器重置超时时间（1分钟）
+  maxSize: 1000, // 最大条目数
+  maxAge: 24 * 60 * 60 * 1000, // 最大存活时间（24小时）
 };
 
 // 断路器状态存储
 const circuitBreakers = new Map<string, CircuitBreakerState>();
+
+/**
+ * 清理断路器过期条目
+ * 防止内存泄漏
+ */
+function cleanupCircuitBreakers(): void {
+  const now = Date.now();
+  const entries = [...circuitBreakers.entries()];
+  
+  // 删除过期条目
+  for (const [key, state] of entries) {
+    if (now - state.lastFailureTime > CIRCUIT_BREAKER_CONFIG.maxAge) {
+      circuitBreakers.delete(key);
+    }
+  }
+  
+  // 如果超过最大数量，删除最旧的条目
+  if (circuitBreakers.size > CIRCUIT_BREAKER_CONFIG.maxSize) {
+    const sorted = entries
+      .filter(([key]) => circuitBreakers.has(key))
+      .sort((a, b) => a[1].lastFailureTime - b[1].lastFailureTime);
+    const toDelete = sorted.slice(0, circuitBreakers.size - CIRCUIT_BREAKER_CONFIG.maxSize);
+    for (const [key] of toDelete) {
+      circuitBreakers.delete(key);
+    }
+    logger.debug(`清理了 ${toDelete.length} 个断路器条目`, { module: 'ProxyManager' });
+  }
+}
 
 /**
  * 检查断路器是否打开
@@ -171,6 +201,12 @@ export async function initProxyManager(): Promise<void> {
       } else {
         logger.info("使用内存模式", { module: 'ProxyManager' });
         await refreshProxyPool();
+      }
+
+      // 启动断路器定时清理（每小时清理一次）
+      if (typeof setInterval !== 'undefined') {
+        setInterval(cleanupCircuitBreakers, 60 * 60 * 1000);
+        logger.debug("断路器清理定时器已启动", { module: 'ProxyManager' });
       }
 
       isInitialized = true;
@@ -439,18 +475,20 @@ async function reportProxyFailedToDatabase(proxy: ProxyInfo): Promise<void> {
     const updated = await incrementFailureCount(proxy.ip, parseInt(proxy.port, 10));
 
     if (!updated) {
-      console.log(`[ProxyManager] 代理不存在: ${proxy.ip}:***`);
+      logger.debug(`代理不存在: ${proxy.ip}:***`, { module: 'ProxyManager' });
       return;
     }
 
-    console.log(
-      `[ProxyManager] 代理失败次数: ${updated.failure_count} (${proxy.ip}:***)`,
+    logger.debug(
+      `代理失败次数: ${updated.failure_count} (${proxy.ip}:***)`,
+      { module: 'ProxyManager' }
     );
 
     // 检查是否超过阈值
     if (updated.failure_count >= DATABASE_CONFIG.failureThreshold) {
-      console.log(
-        `[ProxyManager] 代理失败次数超过阈值，移入废弃表: ${proxy.ip}:***`,
+      logger.info(
+        `代理失败次数超过阈值，移入废弃表: ${proxy.ip}:***`,
+        { module: 'ProxyManager' }
       );
 
       // 移入废弃表
@@ -467,7 +505,11 @@ async function reportProxyFailedToDatabase(proxy: ProxyInfo): Promise<void> {
       await deleteProxy(updated.ip, updated.port);
     }
   } catch (error) {
-    console.error("[ProxyManager] 报告代理失败失败:", error);
+    logger.error(
+      `报告代理失败失败: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      error instanceof Error ? error : undefined,
+      { module: 'ProxyManager' }
+    );
   }
 }
 

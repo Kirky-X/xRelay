@@ -11,6 +11,7 @@
 import pg from "pg";
 import { createClient } from "@vercel/postgres";
 import { DATABASE_CONFIG } from "../config.js";
+import { logger } from "../logger.js";
 
 const { Pool } = pg;
 
@@ -49,7 +50,7 @@ export async function initDatabase(): Promise<boolean> {
     const databaseUrl = process.env.DATABASE_URL;
 
     if (!databaseUrl) {
-      console.log("[Database] DATABASE_URL not configured, using memory mode");
+      logger.info("DATABASE_URL not configured, using memory mode", { module: 'Database' });
       isDatabaseEnabled = false;
       return false;
     }
@@ -58,7 +59,7 @@ export async function initDatabase(): Promise<boolean> {
     useVercelPostgres = isVercelEnvironment();
 
     if (useVercelPostgres) {
-      console.log("[Database] Using Vercel Postgres serverless client");
+      logger.info("Using Vercel Postgres serverless client", { module: 'Database' });
       isDatabaseEnabled = true;
 
       // 自动运行迁移
@@ -81,7 +82,7 @@ export async function initDatabase(): Promise<boolean> {
       await client.query("SELECT NOW()");
       client.release();
 
-      console.log("[Database] Database connection pool established successfully");
+      logger.info("Database connection pool established successfully", { module: 'Database' });
       isDatabaseEnabled = true;
 
       // 自动运行迁移
@@ -89,8 +90,12 @@ export async function initDatabase(): Promise<boolean> {
 
       return true;
     } catch (error) {
-      console.error("[Database] Failed to connect to database:", error);
-      console.log("[Database] Falling back to memory mode");
+      logger.error(
+        `Failed to connect to database: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error instanceof Error ? error : undefined,
+        { module: 'Database' }
+      );
+      logger.info("Falling back to memory mode", { module: 'Database' });
       isDatabaseEnabled = false;
       pool = null;
       return false;
@@ -126,7 +131,7 @@ export function isDatabaseReady(): boolean {
  */
 export async function query(
   text: string,
-  params?: any[],
+  params?: unknown[],
 ): Promise<pg.QueryResult> {
   const start = Date.now();
 
@@ -138,11 +143,15 @@ export async function query(
       // 使用 query 方法（VercelClient 继承自 pg.Client）
       const result = await client.query(text, params);
       const duration = Date.now() - start;
-      console.log(`[Database] Query executed in ${duration}ms: ${text.substring(0, 100)}...`);
+      logger.debug(`Query executed in ${duration}ms`, { module: 'Database' });
 
       return result;
     } catch (error) {
-      console.error("[Database] Vercel Postgres query failed:", error);
+      logger.error(
+        `Vercel Postgres query failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error instanceof Error ? error : undefined,
+        { module: 'Database' }
+      );
       throw error;
     }
   } else {
@@ -154,10 +163,14 @@ export async function query(
     try {
       const result = await pool.query(text, params);
       const duration = Date.now() - start;
-      console.log(`[Database] Query executed in ${duration}ms: ${text.substring(0, 100)}...`);
+      logger.debug(`Query executed in ${duration}ms`, { module: 'Database' });
       return result;
     } catch (error) {
-      console.error("[Database] Query failed:", error);
+      logger.error(
+        `Query failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error instanceof Error ? error : undefined,
+        { module: 'Database' }
+      );
       throw error;
     }
   }
@@ -167,8 +180,8 @@ export async function query(
  * 执行事务
  */
 export async function transaction(
-  callback: (client: any) => Promise<any>,
-): Promise<any> {
+  callback: (client: unknown) => Promise<unknown>,
+): Promise<unknown> {
   if (useVercelPostgres) {
     // Vercel 环境：使用 @vercel/postgres 的事务
     const client = createClient();
@@ -210,7 +223,7 @@ export async function transaction(
  */
 export async function closeDatabase(): Promise<void> {
   if (useVercelPostgres) {
-    console.log("[Database] Vercel Postgres uses serverless connections, no close needed");
+    logger.debug("Vercel Postgres uses serverless connections, no close needed", { module: 'Database' });
     return;
   }
 
@@ -218,7 +231,7 @@ export async function closeDatabase(): Promise<void> {
     await pool.end();
     pool = null;
     isDatabaseEnabled = false;
-    console.log("[Database] Database connection pool closed");
+    logger.info("Database connection pool closed", { module: 'Database' });
   }
 }
 
@@ -240,11 +253,72 @@ export function getDatabaseStatus(): {
 }
 
 /**
+ * 内联的数据库 Schema SQL
+ * 用于 Edge Runtime 环境（不支持 fs 模块）
+ */
+const SCHEMA_SQL = `
+  -- 可用代理表
+  CREATE TABLE IF NOT EXISTS xrelay.available_proxies (
+    id SERIAL PRIMARY KEY,
+    ip VARCHAR(45) NOT NULL,
+    port INTEGER NOT NULL CHECK (port > 0 AND port <= 65535),
+    source VARCHAR(50) DEFAULT 'unknown',
+    protocol VARCHAR(10) DEFAULT 'http',
+    failure_count INTEGER DEFAULT 0,
+    success_count INTEGER DEFAULT 0,
+    weight_score FLOAT DEFAULT 0.5,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(ip, port)
+  );
+
+  -- 废弃代理表
+  CREATE TABLE IF NOT EXISTS xrelay.deprecated_proxies (
+    id SERIAL PRIMARY KEY,
+    ip VARCHAR(45) NOT NULL,
+    port INTEGER NOT NULL CHECK (port > 0 AND port <= 65535),
+    source VARCHAR(50) DEFAULT 'unknown',
+    protocol VARCHAR(10) DEFAULT 'http',
+    failure_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deprecated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(ip, port)
+  );
+
+  -- 创建索引
+  CREATE INDEX IF NOT EXISTS idx_available_proxies_ip_port ON xrelay.available_proxies(ip, port);
+  CREATE INDEX IF NOT EXISTS idx_available_proxies_failure ON xrelay.available_proxies(failure_count);
+  CREATE INDEX IF NOT EXISTS idx_available_proxies_weight ON xrelay.available_proxies(weight_score DESC);
+  CREATE INDEX IF NOT EXISTS idx_deprecated_proxies_created ON xrelay.deprecated_proxies(created_at);
+
+  -- 创建更新时间触发器函数
+  CREATE OR REPLACE FUNCTION xrelay.update_updated_at_column()
+  RETURNS TRIGGER AS $$
+  BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    NEW.weight_score = CASE 
+      WHEN (NEW.success_count + NEW.failure_count + 2) = 0 THEN 0.5
+      ELSE (NEW.success_count + 1.0) / (NEW.success_count + NEW.failure_count + 2.0)
+    END;
+    RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+
+  -- 创建触发器
+  DROP TRIGGER IF EXISTS update_available_proxies_updated_at ON xrelay.available_proxies;
+  CREATE TRIGGER update_available_proxies_updated_at
+    BEFORE UPDATE ON xrelay.available_proxies
+    FOR EACH ROW
+    EXECUTE FUNCTION xrelay.update_updated_at_column();
+`;
+
+/**
  * 自动运行迁移
+ * 使用内联 SQL，兼容 Edge Runtime
  */
 async function autoRunMigration(): Promise<void> {
   try {
-    console.log("[Database] Checking for pending migrations...");
+    logger.debug("Checking for pending migrations...", { module: 'Database' });
 
     // 确保 schema 存在
     await query("CREATE SCHEMA IF NOT EXISTS xrelay");
@@ -268,23 +342,14 @@ async function autoRunMigration(): Promise<void> {
     const executedCount = parseInt(result.rows[0].count as string, 10);
 
     if (executedCount > 0) {
-      console.log("[Database] Migration already executed, skipping");
+      logger.debug("Migration already executed, skipping", { module: 'Database' });
       return;
     }
 
-    // 执行迁移
-    console.log("[Database] Running initial migration...");
-    const { readFileSync } = await import("fs");
-    const { fileURLToPath } = await import("url");
-    const { dirname, join } = await import("path");
-
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    const schemaPath = join(__dirname, "schema.sql");
-    const schemaSql = readFileSync(schemaPath, "utf-8");
-
-    // 分割 SQL 语句并逐个执行
-    const statements = schemaSql
+    // 执行迁移（使用内联 SQL）
+    logger.info("Running initial migration...", { module: 'Database' });
+    
+    const statements = SCHEMA_SQL
       .split(";")
       .map(s => s.trim())
       .filter(s => s.length > 0);
@@ -301,9 +366,13 @@ async function autoRunMigration(): Promise<void> {
       [migrationName]
     );
 
-    console.log("[Database] Initial migration completed successfully");
+    logger.info("Initial migration completed successfully", { module: 'Database' });
   } catch (error) {
-    console.error("[Database] Auto migration failed:", error);
+    logger.error(
+      `Auto migration failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      error instanceof Error ? error : undefined,
+      { module: 'Database' }
+    );
     // 不抛出错误，允许应用继续运行
   }
 }

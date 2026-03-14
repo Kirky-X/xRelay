@@ -70,12 +70,10 @@ vi.mock('../../src/config.js', () => ({
 
 vi.mock('../../src/logger.js', () => ({
   logger: {
-    proxyManager: {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      verbose: vi.fn(),
-    },
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   },
 }));
 

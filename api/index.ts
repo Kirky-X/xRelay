@@ -13,12 +13,24 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { ProxyService } from "../src/core/proxy-service.js";
 import { validateApiKey } from "../src/middleware/auth.js";
 import { checkRateLimit, getClientIp } from "../src/middleware/rate-limit.js";
-import { validateUrl } from "../src/security/url-validator.js";
+import { validateUrl, validateDnsResolution } from "../src/security.js";
 import { AppError, ErrorCode } from "../src/errors/index.js";
+import { CORS_CONFIG, isProduction, validateProductionConfig } from "../src/config.js";
+import { generateRequestId } from "../src/utils/crypto.js";
 import type { ProxyRequest } from "../src/types/index.js";
 
 // 创建代理服务实例（单例）
 const proxyService = new ProxyService();
+
+// 生产环境启动时验证配置
+if (isProduction()) {
+  const configResult = validateProductionConfig();
+  if (!configResult.valid) {
+    console.error("[Security] Configuration errors:", configResult.errors);
+    // 在 Vercel 环境中记录警告，但不阻止启动
+    // 实际生产中应该通过 CI/CD 检查
+  }
+}
 
 /**
  * 发送错误响应
@@ -34,22 +46,26 @@ function setSecurityHeaders(res: VercelResponse): void {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
 }
 
 /**
- * 设置 CORS 响应头
+ * 设置 CORS 响应头（动态白名单）
  */
-function setCorsHeaders(res: VercelResponse): void {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+function setCorsHeaders(res: VercelResponse, origin?: string): void {
+  const allowedOrigins = CORS_CONFIG.allowedOrigins;
+  
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else if (!isProduction()) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  }
+  
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
-}
-
-/**
- * 生成请求 ID
- */
-function generateRequestId(): string {
-  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  res.setHeader("Access-Control-Max-Age", "86400");
 }
 
 /**
@@ -64,7 +80,8 @@ export default async function handler(
 
   // 设置响应头
   setSecurityHeaders(res);
-  setCorsHeaders(res);
+  const origin = req.headers.origin as string | undefined;
+  setCorsHeaders(res, origin);
 
   // 处理 OPTIONS 预检请求
   if (req.method === "OPTIONS") {
@@ -80,7 +97,7 @@ export default async function handler(
       status: "healthy",
       timestamp: new Date().toISOString(),
       version: "1.0.0",
-      uptime: Math.floor(process.uptime()),
+      uptime: Math.floor(process.uptime?.() ?? 0),
       requestId,
     });
     return;
@@ -122,8 +139,33 @@ export default async function handler(
     const { url, method = "GET", headers = {}, body, timeout }: ProxyRequest =
       req.body || {};
 
-    // URL 验证
-    validateUrl(url);
+    // URL 验证（静态检查）
+    const urlValidation = validateUrl(url);
+    if (!urlValidation.valid) {
+      sendError(
+        res,
+        new AppError(ErrorCode.INVALID_URL, urlValidation.error || "Invalid URL", 400),
+        requestId
+      );
+      return;
+    }
+
+    // DNS 重绑定防护（动态检查）
+    try {
+      const parsedUrl = new URL(url);
+      const dnsResult = await validateDnsResolution(parsedUrl.hostname);
+      if (!dnsResult.valid) {
+        sendError(
+          res,
+          new AppError(ErrorCode.INVALID_URL, dnsResult.error || "DNS validation failed", 400),
+          requestId
+        );
+        return;
+      }
+    } catch (dnsError) {
+      // DNS 解析失败，记录日志但不阻止请求（降级处理）
+      console.warn(`[Security] DNS validation failed for ${url}:`, dnsError);
+    }
 
     // 执行代理请求
     const response = await proxyService.execute({
@@ -147,9 +189,13 @@ export default async function handler(
     if (error instanceof AppError) {
       sendError(res, error, requestId);
     } else {
+      const errorMessage = isProduction()
+        ? "Internal server error"
+        : (error instanceof Error ? error.message : "Unknown error");
+      
       const appError = new AppError(
         ErrorCode.INTERNAL_ERROR,
-        error instanceof Error ? error.message : "Unknown error",
+        errorMessage,
         500
       );
       sendError(res, appError, requestId);

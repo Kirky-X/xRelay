@@ -9,9 +9,9 @@
  */
 
 import { AppError, ErrorCode } from '../errors/index.js';
+import { SECURITY_CONFIG } from '../config.js';
 import type { ProxyRequest } from '../types/index.js';
 
-const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_URL_LENGTH = 2048;
 
 export function validateRequest(data: unknown): ProxyRequest {
@@ -39,9 +39,9 @@ export function validateRequest(data: unknown): ProxyRequest {
     throw new AppError(ErrorCode.INTERNAL_ERROR, 'Invalid HTTP method', 400);
   }
 
-  // Validate body size
+  // Validate body size (use config value)
   if (request.body && typeof request.body === 'string') {
-    if (request.body.length > MAX_BODY_SIZE) {
+    if (request.body.length > SECURITY_CONFIG.maxRequestSize) {
       throw new AppError(ErrorCode.REQUEST_TOO_LARGE, 'Request body is too large', 413);
     }
   }
@@ -53,7 +53,7 @@ export function validateRequest(data: unknown): ProxyRequest {
       if (typeof value === 'string') {
         // Check for header injection
         if (key.includes('\r') || key.includes('\n') || value.includes('\r') || value.includes('\n')) {
-          continue; // Skip potentially malicious headers
+          continue;
         }
         headers[key] = value;
       }

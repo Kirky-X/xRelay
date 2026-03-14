@@ -32,6 +32,12 @@ export interface RateLimitResult {
  * @returns 客户端 IP 地址
  */
 export function getClientIp(req: VercelRequest): string {
+  // 优先使用 Vercel 提供的 IP
+  const vercelIp = (req as VercelRequest & { ip?: string }).ip;
+  if (vercelIp) {
+    return vercelIp;
+  }
+
   // 尝试从各种 headers 中获取真实 IP
   const forwardedFor = req.headers["x-forwarded-for"];
   if (forwardedFor) {
@@ -44,12 +50,6 @@ export function getClientIp(req: VercelRequest): string {
   const realIp = req.headers["x-real-ip"];
   if (realIp) {
     return Array.isArray(realIp) ? realIp[0] : realIp;
-  }
-
-  // Vercel 提供的 IP
-  const vercelIp = (req as VercelRequest & { ip?: string }).ip;
-  if (vercelIp) {
-    return vercelIp;
   }
 
   // 默认返回 unknown
@@ -83,6 +83,41 @@ export async function checkRateLimitForIp(
 // 模块级限流存储
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
+// 限流配置
+const RATE_LIMIT_WINDOW = 60000; // 1 分钟
+const RATE_LIMIT_MAX = 100;
+const MAX_STORE_SIZE = 10000; // 最大存储条目数
+
+/**
+ * 清理过期的限流条目
+ * 防止内存泄漏
+ */
+function cleanupRateLimitStore(): void {
+  const now = Date.now();
+  
+  // 删除过期条目
+  for (const [key, record] of rateLimitStore.entries()) {
+    if (now > record.resetAt) {
+      rateLimitStore.delete(key);
+    }
+  }
+  
+  // 如果超过最大数量，删除最旧的条目
+  if (rateLimitStore.size > MAX_STORE_SIZE) {
+    const entries = [...rateLimitStore.entries()]
+      .sort((a, b) => a[1].resetAt - b[1].resetAt);
+    const toDelete = entries.slice(0, rateLimitStore.size - MAX_STORE_SIZE);
+    for (const [key] of toDelete) {
+      rateLimitStore.delete(key);
+    }
+  }
+}
+
+// 启动定时清理（每分钟）
+if (typeof setInterval !== 'undefined') {
+  setInterval(cleanupRateLimitStore, 60 * 1000);
+}
+
 /**
  * 同步版本的限流检查（用于简单场景）
  * 注意：此函数返回一个 Promise 的占位结果，实际限流检查是异步的
@@ -90,10 +125,6 @@ const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
  * @returns 限流检查结果
  */
 export function checkRateLimit(clientIp: string): RateLimitResult {
-  // 简单的内存限流（用于无 KV 环境的降级方案）
-  const RATE_LIMIT_WINDOW = 60000; // 1 分钟
-  const RATE_LIMIT_MAX = 100;
-
   const now = Date.now();
   const record = rateLimitStore.get(clientIp);
 

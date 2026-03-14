@@ -15,12 +15,12 @@ import {
   reportProxyFailed,
   reportProxySuccess,
 } from "./proxy-manager.js";
-import { REQUEST_TIMEOUT_CONFIG, DATABASE_CONFIG } from "./config.js";
+import { REQUEST_TIMEOUT_CONFIG, DATABASE_CONFIG, SECURITY_CONFIG } from "./config.js";
 import { request as undiciRequest, ProxyAgent } from "undici";
 import { logger } from "./logger.js";
 
-// 响应体大小限制常量
-const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB
+// 响应体大小限制（使用配置值的 100 倍，因为响应体通常比请求体大）
+const MAX_RESPONSE_SIZE = SECURITY_CONFIG.maxRequestSize * 100;
 
 // 重试配置
 const RETRY_CONFIG = {

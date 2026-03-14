@@ -126,23 +126,35 @@ function calculateWeight(proxy: AvailableProxy): number {
 
 /**
  * 根据权重获取 N 个代理（加权随机选择）
- * 使用数据库层的加权随机算法，复杂度 O(n log n)
- * 算法原理：-LOG(RANDOM()) / weight 产生指数分布，权重越高越可能排在前面
+ * 使用权重索引优化查询性能
+ * 当 weight_score 存在时使用索引，否则降级到计算方式
  */
 export async function getWeightedProxies(count: number): Promise<AvailableProxy[]> {
-  // 使用 SQL 的加权随机排序
-  // 权重计算：(success_count + 1) / (success_count + failure_count + 1)
-  // 使用 GREATEST 避免除零，使用 -LOG(RANDOM()) 生成指数分布
+  // 优先使用权重索引（如果存在）
+  // 权重索引由触发器自动维护
   const text = `
     SELECT * FROM xrelay.available_proxies
-    ORDER BY -LOG(RANDOM()) / GREATEST(
-      (success_count + 1.0) / (success_count + failure_count + 2.0),
-      0.01
-    )
+    WHERE weight_score IS NOT NULL
+    ORDER BY -LOG(RANDOM()) / GREATEST(weight_score, 0.01)
     LIMIT $1
   `;
 
   const result = await query(text, [count]);
+  
+  // 如果没有结果，尝试降级查询
+  if (result.rows.length === 0) {
+    const fallbackText = `
+      SELECT * FROM xrelay.available_proxies
+      ORDER BY -LOG(RANDOM()) / GREATEST(
+        (success_count + 1.0) / (success_count + failure_count + 2.0),
+        0.01
+      )
+      LIMIT $1
+    `;
+    const fallbackResult = await query(fallbackText, [count]);
+    return fallbackResult.rows;
+  }
+  
   return result.rows;
 }
 

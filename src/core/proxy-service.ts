@@ -5,7 +5,7 @@
 
 /**
  * 代理服务模块
- * 封装代理请求执行逻辑
+ * 封装代理请求执行逻辑，集成缓存
  */
 
 import {
@@ -13,7 +13,9 @@ import {
   sendRequestWithMultipleProxies,
   filterDangerousHeaders,
 } from "../request-handler.js";
-import { FEATURES, DATABASE_CONFIG } from "../config.js";
+import { FEATURES, DATABASE_CONFIG, CACHE_CONFIG } from "../config.js";
+import { AdvancedCache } from "../cache/advanced-cache.js";
+import { simpleHash } from "../utils/crypto.js";
 import { logger } from "../logger.js";
 import type { ProxyRequest, ProxyResponse } from "../types/index.js";
 
@@ -25,6 +27,13 @@ export interface ProxyServiceConfig {
   useFallback?: boolean;
   maxProxyAttempts?: number;
   proxyCount?: number;
+}
+
+/**
+ * 缓存响应类型
+ */
+interface CachedProxyResponse extends ProxyResponse {
+  cached?: boolean;
 }
 
 /**
@@ -61,14 +70,22 @@ function normalizeResponse(response: {
  */
 export class ProxyService {
   private defaultConfig: ProxyServiceConfig;
+  private cache: AdvancedCache<CachedProxyResponse>;
 
   constructor(config?: ProxyServiceConfig) {
     this.defaultConfig = {
+      useCache: FEATURES.enableCache,
       useFallback: FEATURES.enableFallback,
       maxProxyAttempts: 3,
       proxyCount: DATABASE_CONFIG.proxiesPerRequest,
       ...config,
     };
+    
+    // 初始化缓存
+    this.cache = new AdvancedCache<CachedProxyResponse>(
+      CACHE_CONFIG.maxSize,
+      CACHE_CONFIG.ttl
+    );
   }
 
   /**
@@ -80,11 +97,23 @@ export class ProxyService {
   async execute(
     request: ProxyRequest,
     config?: ProxyServiceConfig
-  ): Promise<ProxyResponse> {
+  ): Promise<CachedProxyResponse> {
     const mergedConfig = { ...this.defaultConfig, ...config };
 
     // 规范化请求
     const normalizedRequest = this.normalizeRequest(request);
+
+    // 生成缓存键（仅对 GET 请求缓存）
+    const cacheKey = this.generateCacheKey(normalizedRequest);
+    
+    // 检查缓存（仅 GET 请求）
+    if (mergedConfig.useCache && normalizedRequest.method === "GET") {
+      const cached = this.cache.get(cacheKey);
+      if (cached) {
+        logger.debug(`缓存命中: ${this.maskUrl(normalizedRequest.url)}`, { module: 'ProxyService' });
+        return { ...cached, cached: true };
+      }
+    }
 
     // 记录请求日志
     logger.info(
@@ -111,7 +140,15 @@ export class ProxyService {
         { module: 'ProxyService' }
       );
 
-      return normalizeResponse(response);
+      const normalizedResponse = normalizeResponse(response);
+      
+      // 缓存成功的 GET 请求响应
+      if (mergedConfig.useCache && normalizedRequest.method === "GET" && response.success) {
+        this.cache.set(cacheKey, normalizedResponse, CACHE_CONFIG.ttl);
+        logger.debug(`已缓存响应: ${this.maskUrl(normalizedRequest.url)}`, { module: 'ProxyService' });
+      }
+
+      return normalizedResponse;
     } catch (error) {
       logger.error(
         `代理请求失败: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -140,7 +177,7 @@ export class ProxyService {
   async executeSequential(
     request: ProxyRequest,
     config?: ProxyServiceConfig
-  ): Promise<ProxyResponse> {
+  ): Promise<CachedProxyResponse> {
     const mergedConfig = { ...this.defaultConfig, ...config };
 
     // 规范化请求
@@ -178,6 +215,29 @@ export class ProxyService {
         fallbackUsed: false,
       };
     }
+  }
+
+  /**
+   * 清除缓存
+   */
+  clearCache(): void {
+    this.cache.clear();
+    logger.info("缓存已清除", { module: 'ProxyService' });
+  }
+
+  /**
+   * 获取缓存统计
+   */
+  getCacheStats(): { size: number; maxSize: number; hitRate: number } {
+    return this.cache.getStats();
+  }
+
+  /**
+   * 生成缓存键
+   */
+  private generateCacheKey(request: { url: string; method: string; body?: string }): string {
+    const key = `${request.method}:${request.url}:${request.body || ""}`;
+    return simpleHash(key);
   }
 
   /**
