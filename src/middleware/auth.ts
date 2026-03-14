@@ -12,6 +12,7 @@ import type { VercelRequest } from "@vercel/node";
 import { API_KEY_CONFIG } from "../config.js";
 import { createInvalidApiKeyError } from "../errors/index.js";
 import { timingSafeEqualString } from "../utils/crypto.js";
+import { logger } from "../logger.js";
 
 /**
  * 验证 API Key
@@ -24,7 +25,7 @@ export function validateApiKey(req: VercelRequest): void {
   }
 
   if (API_KEY_CONFIG.keys.length === 0) {
-    console.error("[Auth] API Key verification enabled but no keys configured");
+    logger.error('API Key 验证已启用但未配置密钥', undefined, { module: 'Auth' });
     throw createInvalidApiKeyError();
   }
 
@@ -57,7 +58,7 @@ export function validateApiKeyFromRequest(request: Request): void {
   }
 
   if (API_KEY_CONFIG.keys.length === 0) {
-    console.error("[Auth] API Key verification enabled but no keys configured");
+    logger.error('API Key 验证已启用但未配置密钥', undefined, { module: 'Auth' });
     throw createInvalidApiKeyError();
   }
 

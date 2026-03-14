@@ -8,7 +8,7 @@
  * 核心功能：代理请求 → 失败切换 → Fallback 直连
  */
 
-import type { ProxyInfo } from "./proxy-fetcher.js";
+import type { ProxyInfo } from "./types/index.js";
 import {
   getAvailableProxy,
   getMultipleProxies,
@@ -103,7 +103,7 @@ async function retryWithBackoff<T>(
       
       if (i < maxRetries - 1) {
         const delay = Math.min(baseDelay * Math.pow(2, i), RETRY_CONFIG.maxDelay);
-        console.log(`[RequestHandler] 重试 ${i + 1}/${maxRetries}，等待 ${delay}ms 后重试...`);
+        logger.debug(`重试 ${i + 1}/${maxRetries}，等待 ${delay}ms 后重试`, { module: 'RequestHandler' });
         await sleep(delay);
       }
     }

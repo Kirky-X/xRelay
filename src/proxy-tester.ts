@@ -9,7 +9,7 @@
  * 支持数据库集成
  */
 
-import type { ProxyInfo } from "./proxy-fetcher.js";
+import type { ProxyInfo } from "./types/index.js";
 import { PROXY_TEST_CONFIG, DATABASE_CONFIG } from "./config.js";
 import { isDatabaseReady } from "./database/connection.js";
 import {

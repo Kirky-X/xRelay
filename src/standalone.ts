@@ -17,6 +17,8 @@ import { CORS_CONFIG, isProduction, validateProductionConfig, FEATURES } from ".
 import { generateRequestId } from "./utils/crypto.js";
 import { logger } from "./logger.js";
 import type { ProxyRequest } from "./types/index.js";
+import { captureWebpage } from "./webpage-capture/index.js";
+import type { CaptureRequest } from "./webpage-capture/types.js";
 
 const proxyService = new ProxyService();
 
@@ -57,6 +59,139 @@ function jsonError(error: AppError, requestId?: string): object {
   return error.toJSON(requestId);
 }
 
+async function handleCapture(
+  request: Request,
+  requestId: string,
+  startTime: number,
+  headers: Headers
+): Promise<Response> {
+  try {
+    const clientIp = getClientIpFromRequest(request);
+    const rateLimit = checkRateLimit(clientIp, "capture");
+
+    headers.set("X-RateLimit-Limit", "30");
+    headers.set("X-RateLimit-Remaining", rateLimit.remaining.toString());
+    headers.set("X-RateLimit-Reset", rateLimit.resetAt.toString());
+
+    if (!rateLimit.allowed) {
+      headers.set("Content-Type", "application/json");
+      return new Response(
+        JSON.stringify(jsonError(
+          new AppError(ErrorCode.RATE_LIMITED, "Rate limit exceeded for capture endpoint", 429),
+          requestId
+        )),
+        { status: 429, headers }
+      );
+    }
+
+    if (FEATURES.enableApiKey) {
+      validateApiKeyFromRequest(request);
+    }
+
+    let body: CaptureRequest;
+    try {
+      body = await request.json();
+    } catch {
+      headers.set("Content-Type", "application/json");
+      return new Response(
+        JSON.stringify(jsonError(
+          new AppError(ErrorCode.INVALID_REQUEST, "Invalid JSON body", 400),
+          requestId
+        )),
+        { status: 400, headers }
+      );
+    }
+
+    const { url, options }: CaptureRequest = body;
+
+    if (!url) {
+      headers.set("Content-Type", "application/json");
+      return new Response(
+        JSON.stringify(jsonError(
+          new AppError(ErrorCode.INVALID_URL, "URL is required", 400),
+          requestId
+        )),
+        { status: 400, headers }
+      );
+    }
+
+    const urlValidation = validateUrl(url);
+    if (!urlValidation.valid) {
+      headers.set("Content-Type", "application/json");
+      return new Response(
+        JSON.stringify(jsonError(
+          new AppError(ErrorCode.INVALID_URL, urlValidation.error || "Invalid URL", 400),
+          requestId
+        )),
+        { status: 400, headers }
+      );
+    }
+
+    try {
+      const parsedUrl = new URL(url);
+      const dnsResult = await validateDnsResolution(parsedUrl.hostname);
+      if (!dnsResult.valid) {
+        logger.warn(`DNS validation failed for ${url}: ${dnsResult.error}`);
+      }
+    } catch (dnsError) {
+      logger.warn(`DNS validation error for ${url}: ${dnsError}`);
+    }
+
+    const result = await captureWebpage(url, options);
+
+    headers.set("X-Request-Id", requestId);
+    headers.set("Content-Type", "application/json");
+
+    if (result.success) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            html: result.html,
+            title: result.title,
+            url: result.url,
+            mode: result.mode,
+            resources: result.resources,
+            article: result.article,
+            capturedAt: result.capturedAt,
+            duration: result.duration,
+          },
+          requestId,
+          duration: Date.now() - startTime,
+        }),
+        { status: 200, headers }
+      );
+    } else {
+      return new Response(
+        JSON.stringify(jsonError(
+          new AppError(ErrorCode.INTERNAL_ERROR, result.error || "Capture failed", 500),
+          requestId
+        )),
+        { status: 500, headers }
+      );
+    }
+  } catch (error) {
+    headers.set("Content-Type", "application/json");
+
+    if (error instanceof AppError) {
+      return new Response(
+        JSON.stringify(jsonError(error, requestId)),
+        { status: error.statusCode, headers }
+      );
+    }
+
+    const errorMessage = isProduction()
+      ? "Internal server error"
+      : (error instanceof Error ? error.message : "Unknown error");
+
+    const appError = new AppError(ErrorCode.INTERNAL_ERROR, errorMessage, 500);
+    return new Response(
+      JSON.stringify(jsonError(appError, requestId)),
+      { status: 500, headers }
+    );
+  }
+}
+
 async function handleRequest(request: Request): Promise<Response> {
   const requestId = generateRequestId();
   const startTime = Date.now();
@@ -84,6 +219,10 @@ async function handleRequest(request: Request): Promise<Response> {
       }),
       { status: 200, headers }
     );
+  }
+
+  if (request.method === "POST" && path === "/api/capture") {
+    return handleCapture(request, requestId, startTime, headers);
   }
 
   if (request.method !== "POST" || path !== "/api") {
@@ -152,17 +291,10 @@ async function handleRequest(request: Request): Promise<Response> {
       const parsedUrl = new URL(targetUrl);
       const dnsResult = await validateDnsResolution(parsedUrl.hostname);
       if (!dnsResult.valid) {
-        headers.set("Content-Type", "application/json");
-        return new Response(
-          JSON.stringify(jsonError(
-            new AppError(ErrorCode.INVALID_URL, dnsResult.error || "DNS validation failed", 400),
-            requestId
-          )),
-          { status: 400, headers }
-        );
+        logger.warn(`DNS validation failed for ${targetUrl}: ${dnsResult.error}`);
       }
     } catch (dnsError) {
-      logger.warn(`DNS validation failed for ${targetUrl}: ${dnsError}`);
+      logger.warn(`DNS validation error for ${targetUrl}: ${dnsError}`);
     }
 
     const response = await proxyService.execute({

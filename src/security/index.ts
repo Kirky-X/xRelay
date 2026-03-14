@@ -8,6 +8,6 @@
  * 导出限流器、请求验证器和 URL 验证器
  */
 
-export { SlidingWindowRateLimiter, type RateLimitResult } from './rate-limiter.js';
 export { validateRequest } from './request-validator.js';
 export { validateUrl, isValidPublicUrl, validateUrlSafe, isValidHttpUrl, extractDomain, normalizeUrl, type UrlValidationResult } from './url-validator.js';
+export type { RateLimitResult } from '../middleware/rate-limit.js';

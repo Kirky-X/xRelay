@@ -43,3 +43,6 @@ yarn-error.log*
 
 # Docker
 docker-compose.override.yml
+
+# Test output
+temp/

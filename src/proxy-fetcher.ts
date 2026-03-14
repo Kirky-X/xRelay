@@ -11,6 +11,7 @@
 import { PROXY_CONFIG, REQUEST_TIMEOUT_CONFIG } from "./config.js";
 import { validateProxyInfo, validateProxySource } from "./security.js";
 import { logger } from "./logger.js";
+import type { ProxyInfo } from "./types/index.js";
 
 // 代理源配置
 const PROXY_SOURCES = [
@@ -95,14 +96,6 @@ const PROXY_SOURCES = [
     },
   },
 ];
-
-// 代理信息类型
-export interface ProxyInfo {
-  ip: string;
-  port: string;
-  source: string;
-  timestamp: number;
-}
 
 let cachedProxies: ProxyInfo[] = [];
 let lastFetchTime = 0;

@@ -108,10 +108,12 @@ export async function checkRateLimitForIp(
 
 // 模块级限流存储
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const captureRateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
 // 限流配置
 const RATE_LIMIT_WINDOW = 60000; // 1 分钟
 const RATE_LIMIT_MAX = 100;
+const CAPTURE_RATE_LIMIT_MAX = 30;
 const MAX_STORE_SIZE = 10000; // 最大存储条目数
 
 /**
@@ -145,14 +147,41 @@ if (typeof setInterval !== 'undefined') {
 }
 
 /**
+ * 验证 IP 地址格式是否有效
+ */
+function isValidIpFormat(ip: string): boolean {
+  // IPv4 格式验证
+  const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (ipv4Regex.test(ip)) {
+    const parts = ip.split('.').map(Number);
+    return parts.every(part => part >= 0 && part <= 255);
+  }
+  
+  // IPv6 简单格式验证
+  if (ip.includes(':')) {
+    return ip.length >= 2 && ip.length <= 45;
+  }
+  
+  return false;
+}
+
+/**
  * 同步版本的限流检查（用于简单场景）
  * 注意：此函数返回一个 Promise 的占位结果，实际限流检查是异步的
  * @param clientIp 客户端 IP 地址
+ * @param endpoint 端点类型，可选 'default' | 'capture'
  * @returns 限流检查结果
  */
-export function checkRateLimit(clientIp: string): RateLimitResult {
+export function checkRateLimit(clientIp: string, endpoint?: string): RateLimitResult {
   const now = Date.now();
-  const record = rateLimitStore.get(clientIp);
+  const store = endpoint === 'capture' ? captureRateLimitStore : rateLimitStore;
+  
+  // 对 unknown IP 或无效 IP 实施更严格的限流（原限制的 1/10）
+  const isUnknownOrInvalid = clientIp === 'unknown' || !isValidIpFormat(clientIp);
+  const baseLimit = endpoint === 'capture' ? CAPTURE_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
+  const maxLimit = isUnknownOrInvalid ? Math.floor(baseLimit / 10) : baseLimit;
+  
+  const record = store.get(clientIp);
 
   if (!record || now > record.resetAt) {
     // 创建新窗口
@@ -160,16 +189,16 @@ export function checkRateLimit(clientIp: string): RateLimitResult {
       count: 1,
       resetAt: now + RATE_LIMIT_WINDOW,
     };
-    rateLimitStore.set(clientIp, newRecord);
+    store.set(clientIp, newRecord);
     return {
       allowed: true,
-      remaining: RATE_LIMIT_MAX - 1,
+      remaining: maxLimit - 1,
       resetAt: newRecord.resetAt,
     };
   }
 
   // 在当前窗口内
-  if (record.count >= RATE_LIMIT_MAX) {
+  if (record.count >= maxLimit) {
     return {
       allowed: false,
       remaining: 0,
@@ -181,7 +210,7 @@ export function checkRateLimit(clientIp: string): RateLimitResult {
   record.count++;
   return {
     allowed: true,
-    remaining: RATE_LIMIT_MAX - record.count,
+    remaining: maxLimit - record.count,
     resetAt: record.resetAt,
   };
 }
