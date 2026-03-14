@@ -21,7 +21,7 @@
       <div class="container">
         <!-- Logo -->
         <div class="logo-container">
-          <img src="/xRelay.png" alt="xRelay Logo" />
+          <img src="/docs/asset/xRelay.png" alt="xRelay Logo" />
           <div class="logo-text">xRelay</div>
         </div>
 
