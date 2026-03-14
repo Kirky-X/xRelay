@@ -18,6 +18,8 @@ import { AppError, ErrorCode } from "../src/errors/index.js";
 import { CORS_CONFIG, isProduction, validateProductionConfig } from "../src/config.js";
 import { generateRequestId } from "../src/utils/crypto.js";
 import type { ProxyRequest } from "../src/types/index.js";
+import { captureWebpage } from "../src/webpage-capture/index.js";
+import type { CaptureRequest } from "../src/webpage-capture/types.js";
 
 // 创建代理服务实例（单例）
 const proxyService = new ProxyService();
@@ -40,6 +42,114 @@ function sendError(res: VercelResponse, error: AppError, requestId?: string): vo
 }
 
 /**
+ * 网页捕获处理函数
+ */
+async function handleCapture(
+  req: VercelRequest,
+  res: VercelResponse,
+  requestId: string,
+  startTime: number
+): Promise<void> {
+  try {
+    const clientIp = getClientIp(req);
+    const rateLimit = checkRateLimit(clientIp, "capture");
+
+    res.setHeader("X-RateLimit-Limit", "30");
+    res.setHeader("X-RateLimit-Remaining", rateLimit.remaining.toString());
+    res.setHeader("X-RateLimit-Reset", rateLimit.resetAt.toString());
+
+    if (!rateLimit.allowed) {
+      sendError(
+        res,
+        new AppError(ErrorCode.RATE_LIMITED, "Rate limit exceeded for capture endpoint", 429),
+        requestId
+      );
+      return;
+    }
+
+    validateApiKey(req);
+
+    const { url, options }: CaptureRequest = req.body || {};
+
+    if (!url) {
+      sendError(
+        res,
+        new AppError(ErrorCode.INVALID_URL, "URL is required", 400),
+        requestId
+      );
+      return;
+    }
+
+    const urlValidation = validateUrl(url);
+    if (!urlValidation.valid) {
+      sendError(
+        res,
+        new AppError(ErrorCode.INVALID_URL, urlValidation.error || "Invalid URL", 400),
+        requestId
+      );
+      return;
+    }
+
+    try {
+      const parsedUrl = new URL(url);
+      const dnsResult = await validateDnsResolution(parsedUrl.hostname);
+      if (!dnsResult.valid) {
+        sendError(
+          res,
+          new AppError(ErrorCode.INVALID_URL, dnsResult.error || "DNS validation failed", 400),
+          requestId
+        );
+        return;
+      }
+    } catch (dnsError) {
+      console.warn(`[Security] DNS validation failed for ${url}:`, dnsError);
+    }
+
+    const result = await captureWebpage(url, options);
+
+    res.setHeader("X-Request-Id", requestId);
+
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        data: {
+          html: result.html,
+          title: result.title,
+          url: result.url,
+          mode: result.mode,
+          resources: result.resources,
+          capturedAt: result.capturedAt,
+          duration: result.duration,
+        },
+        requestId,
+        duration: Date.now() - startTime,
+      });
+    } else {
+      sendError(
+        res,
+        new AppError(ErrorCode.INTERNAL_ERROR, result.error || "Capture failed", 500),
+        requestId
+      );
+    }
+  } catch (error) {
+    if (error instanceof AppError) {
+      sendError(res, error, requestId);
+    } else {
+      const errorMessage = isProduction()
+        ? "Internal server error"
+        : (error instanceof Error ? error.message : "Unknown error");
+
+      const appError = new AppError(
+        ErrorCode.INTERNAL_ERROR,
+        errorMessage,
+        500
+      );
+      sendError(res, appError, requestId);
+    }
+  }
+}
+
+/**
  * 设置安全响应头
  */
 function setSecurityHeaders(res: VercelResponse): void {
@@ -56,13 +166,13 @@ function setSecurityHeaders(res: VercelResponse): void {
  */
 function setCorsHeaders(res: VercelResponse, origin?: string): void {
   const allowedOrigins = CORS_CONFIG.allowedOrigins;
-  
+
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   } else if (!isProduction()) {
     res.setHeader("Access-Control-Allow-Origin", "*");
   }
-  
+
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
   res.setHeader("Access-Control-Max-Age", "86400");
@@ -100,6 +210,12 @@ export default async function handler(
       uptime: Math.floor(process.uptime?.() ?? 0),
       requestId,
     });
+    return;
+  }
+
+  // 网页捕获端点
+  if (req.method === "POST" && path === "/api/capture") {
+    await handleCapture(req, res, requestId, startTime);
     return;
   }
 
@@ -192,7 +308,7 @@ export default async function handler(
       const errorMessage = isProduction()
         ? "Internal server error"
         : (error instanceof Error ? error.message : "Unknown error");
-      
+
       const appError = new AppError(
         ErrorCode.INTERNAL_ERROR,
         errorMessage,
