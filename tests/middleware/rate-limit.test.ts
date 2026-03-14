@@ -9,16 +9,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { rateLimitMiddleware } from '../../api/middleware/rate-limit.js';
-import type { MiddlewareContext } from '../../api/middleware/types.js';
+import { rateLimitMiddleware } from '../../src/middleware/rate-limit.js';
+import type { MiddlewareContext } from '../../src/middleware/types.js';
 
 // Mock rate-limiter 模块
-vi.mock('../../api/rate-limiter.js', () => ({
+vi.mock('../../src/rate-limiter.js', () => ({
   checkGlobalRateLimit: vi.fn(),
   checkIpRateLimit: vi.fn(),
 }));
 
-import { checkGlobalRateLimit, checkIpRateLimit } from '../../api/rate-limiter.js';
+import { checkGlobalRateLimit, checkIpRateLimit } from '../../src/rate-limiter.js';
 
 const mockCheckGlobalRateLimit = vi.mocked(checkGlobalRateLimit);
 const mockCheckIpRateLimit = vi.mocked(checkIpRateLimit);

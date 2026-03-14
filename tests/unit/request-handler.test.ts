@@ -13,12 +13,12 @@ import {
   filterDangerousHeaders,
   sendProxyRequest,
   sendRequestWithMultipleProxies,
-} from '../../api/request-handler.js';
-import type { ProxyRequest, ProxyResponse } from '../../api/request-handler.js';
-import * as proxyManager from '../../api/proxy-manager.js';
+} from '../../src/request-handler.js';
+import type { ProxyRequest, ProxyResponse } from '../../src/request-handler.js';
+import * as proxyManager from '../../src/proxy-manager.js';
 
 // Mock proxy-manager 模块
-vi.mock('../../api/proxy-manager.js', () => ({
+vi.mock('../../src/proxy-manager.js', () => ({
   getAvailableProxy: vi.fn(),
   getMultipleProxies: vi.fn(),
   reportProxyFailed: vi.fn(),
@@ -26,19 +26,17 @@ vi.mock('../../api/proxy-manager.js', () => ({
 }));
 
 // Mock logger 模块
-vi.mock('../../api/logger.js', () => ({
+vi.mock('../../src/logger.js', () => ({
   logger: {
-    requestHandler: {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      verbose: vi.fn(),
-    },
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
   },
 }));
 
 // Mock config 模块
-vi.mock('../../api/config.js', () => ({
+vi.mock('../../src/config.js', () => ({
   REQUEST_TIMEOUT_CONFIG: {
     proxy: 30000,
     direct: 10000,

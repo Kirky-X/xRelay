@@ -9,8 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { corsMiddleware, optionsMiddleware, DEFAULT_CORS_CONFIG } from '../../api/middleware/cors.js';
-import type { MiddlewareContext } from '../../api/middleware/types.js';
+import { corsMiddleware, optionsMiddleware, DEFAULT_CORS_CONFIG } from '../../src/middleware/cors.js';
+import type { MiddlewareContext } from '../../src/middleware/types.js';
 
 /**
  * 创建模拟的中间件上下文

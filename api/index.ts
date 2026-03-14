@@ -3,61 +3,70 @@
  * License: MIT
  */
 
+/**
+ * API 入口层 - 薄入口层设计
+ * 仅负责请求解析、响应格式化和错误处理
+ * 业务逻辑委托给核心模块处理
+ */
+
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { ProxyService } from "../src/core/proxy-service.js";
+import { validateApiKey } from "../src/middleware/auth.js";
+import { checkRateLimit, getClientIp } from "../src/middleware/rate-limit.js";
+import { validateUrl } from "../src/security/url-validator.js";
+import { AppError, ErrorCode } from "../src/errors/index.js";
+import type { ProxyRequest } from "../src/types/index.js";
 
-const API_KEYS = process.env.API_KEYS ? process.env.API_KEYS.split(",") : [];
-const ENABLE_API_KEY = process.env.ENABLE_API_KEY === "true";
+// 创建代理服务实例（单例）
+const proxyService = new ProxyService();
 
-function validateApiKey(req: VercelRequest): boolean {
-  if (!ENABLE_API_KEY) return true;
-  if (API_KEYS.length === 0) return false;
-
-  const providedKey = req.headers["x-api-key"] as string | undefined;
-  if (!providedKey) return false;
-
-  return API_KEYS.some(key => {
-    if (key.length !== providedKey.length) return false;
-    return key.split("").every((char, i) => char === providedKey[i]);
-  });
+/**
+ * 发送错误响应
+ */
+function sendError(res: VercelResponse, error: AppError, requestId?: string): void {
+  res.status(error.statusCode).json(error.toJSON(requestId));
 }
 
-function isValidUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    if (!["http:", "https:"].includes(parsed.protocol)) return false;
-
-    const hostname = parsed.hostname;
-
-    // Block localhost
-    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return false;
-
-    // Block private IP ranges
-    if (/^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(hostname)) return false;
-
-    // Block IPv6 private ranges
-    if (/^(fc00:|fd00:|fe80:|::1|::$)/i.test(hostname)) return false;
-
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * 设置安全响应头
+ */
+function setSecurityHeaders(res: VercelResponse): void {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 }
 
+/**
+ * 设置 CORS 响应头
+ */
+function setCorsHeaders(res: VercelResponse): void {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
+}
+
+/**
+ * 生成请求 ID
+ */
+function generateRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+/**
+ * 主处理函数
+ */
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ): Promise<void> {
-  // CORS headers
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
+  const requestId = generateRequestId();
+  const startTime = Date.now();
 
-  // Security headers
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  // 设置响应头
+  setSecurityHeaders(res);
+  setCorsHeaders(res);
 
-  // Handle OPTIONS preflight
+  // 处理 OPTIONS 预检请求
   if (req.method === "OPTIONS") {
     res.status(204).end();
     return;
@@ -65,83 +74,85 @@ export default async function handler(
 
   const path = req.url?.split("?")[0] || "";
 
-  // Health check endpoint
+  // 健康检查端点
   if (req.method === "GET" && (path === "/api/health" || path === "/api/ready" || path === "/api")) {
     res.status(200).json({
       status: "healthy",
       timestamp: new Date().toISOString(),
       version: "1.0.0",
-      uptime: process.uptime ? Math.floor(process.uptime()) : 0,
+      uptime: Math.floor(process.uptime()),
+      requestId,
     });
     return;
   }
 
-  // Only POST to /api is allowed for proxy requests
+  // 仅允许 POST /api 用于代理请求
   if (req.method !== "POST" || path !== "/api") {
-    res.status(405).json({
-      error: "Method not allowed",
-      code: "METHOD_NOT_ALLOWED",
-    });
-    return;
-  }
-
-  // API Key validation
-  if (!validateApiKey(req)) {
-    res.status(401).json({
-      error: "Unauthorized",
-      code: "INVALID_API_KEY",
-    });
-    return;
-  }
-
-  // Parse request body
-  const { url, method = "GET", headers = {}, body } = req.body || {};
-
-  // Validate URL
-  if (!url) {
-    res.status(400).json({
-      error: "URL is required",
-      code: "MISSING_URL",
-    });
-    return;
-  }
-
-  if (!isValidUrl(url)) {
-    res.status(400).json({
-      error: "Invalid or blocked URL",
-      code: "INVALID_URL",
-    });
+    sendError(
+      res,
+      new AppError(ErrorCode.METHOD_NOT_ALLOWED, "Method not allowed", 405),
+      requestId
+    );
     return;
   }
 
   try {
-    // Make the request
-    const response = await fetch(url, {
+    // 限流检查
+    const clientIp = getClientIp(req);
+    const rateLimit = checkRateLimit(clientIp);
+
+    // 设置限流响应头
+    res.setHeader("X-RateLimit-Limit", "100");
+    res.setHeader("X-RateLimit-Remaining", rateLimit.remaining.toString());
+    res.setHeader("X-RateLimit-Reset", rateLimit.resetAt.toString());
+
+    if (!rateLimit.allowed) {
+      sendError(
+        res,
+        new AppError(ErrorCode.RATE_LIMITED, "Rate limit exceeded", 429),
+        requestId
+      );
+      return;
+    }
+
+    // API Key 验证
+    validateApiKey(req);
+
+    // 解析请求体
+    const { url, method = "GET", headers = {}, body, timeout }: ProxyRequest =
+      req.body || {};
+
+    // URL 验证
+    validateUrl(url);
+
+    // 执行代理请求
+    const response = await proxyService.execute({
+      url,
       method,
-      headers: {
-        "User-Agent": "xRelay/1.0",
-        ...headers,
-      },
-      body: method !== "GET" && method !== "HEAD" ? body : undefined,
+      headers,
+      body,
+      timeout,
     });
 
-    // Get response body
-    const responseText = await response.text();
+    // 设置请求 ID 响应头
+    res.setHeader("X-Request-Id", requestId);
 
-    // Return response
+    // 发送成功响应
     res.status(200).json({
-      success: true,
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
-      body: responseText,
+      ...response,
+      requestId,
+      duration: Date.now() - startTime,
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    res.status(500).json({
-      error: "Request failed",
-      code: "REQUEST_FAILED",
-      message: errorMessage,
-    });
+    if (error instanceof AppError) {
+      sendError(res, error, requestId);
+    } else {
+      const appError = new AppError(
+        ErrorCode.INTERNAL_ERROR,
+        error instanceof Error ? error.message : "Unknown error",
+        500
+      );
+      sendError(res, appError, requestId);
+    }
   }
 }

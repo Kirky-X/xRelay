@@ -167,31 +167,31 @@ export function filterDangerousHeaders(headers: Record<string, string>): Record<
     
     // 检查是否为危险 header
     if (DANGEROUS_HEADERS.has(lowerKey)) {
-      logger.requestHandler.verbose(`过滤危险 header: ${key}`);
+      logger.debug(`过滤危险 header: ${key}`, { module: 'RequestHandler' });
       continue;
     }
     
     // 验证 header 名称：不允许包含控制字符和特殊字符
     if (!key.match(/^[a-zA-Z0-9!#$%&'*+-.^_`|~]+$/)) {
-      logger.requestHandler.verbose(`过滤无效 header 名称: ${key}`);
+      logger.debug(`过滤无效 header 名称: ${key}`, { module: 'RequestHandler' });
       continue;
     }
     
     // 验证 header 值：防止 CRLF 注入
     if (typeof value !== 'string') {
-      logger.requestHandler.verbose(`过滤非字符串 header 值: ${key}`);
+      logger.debug(`过滤非字符串 header 值: ${key}`, { module: 'RequestHandler' });
       continue;
     }
     
     // 检查是否包含换行符（CRLF 注入防护）
     if (value.includes('\r') || value.includes('\n')) {
-      logger.requestHandler.verbose(`过滤包含换行符的 header 值: ${key}`);
+      logger.debug(`过滤包含换行符的 header 值: ${key}`, { module: 'RequestHandler' });
       continue;
     }
     
     // 检查是否包含空字节
     if (value.includes('\0')) {
-      logger.requestHandler.verbose(`过滤包含空字节的 header 值: ${key}`);
+      logger.debug(`过滤包含空字节的 header 值: ${key}`, { module: 'RequestHandler' });
       continue;
     }
     
@@ -238,7 +238,7 @@ async function sendRequestWithProxy(
   headers?: Record<string, string>;
   error?: string;
 }> {
-  logger.requestHandler.verbose(`使用代理: ${proxy.ip}:***`);
+  logger.debug(`使用代理: ${proxy.ip}:***`, { module: 'RequestHandler' });
 
   // 使用 undici 的 request 方法直接发送请求
   const proxyUrl = `http://${proxy.ip}:${proxy.port}`;
@@ -321,7 +321,7 @@ async function sendRequestWithProxy(
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
-    logger.requestHandler.error(`代理请求失败: ${errorMessage}`);
+    logger.error(`代理请求失败: ${errorMessage}`, error instanceof Error ? error : undefined, { module: 'RequestHandler' });
     
     return {
       success: false,
@@ -347,7 +347,7 @@ async function sendRequestDirect(request: ProxyRequest): Promise<{
   headers?: Record<string, string>;
   error?: string;
 }> {
-  logger.requestHandler.verbose(`使用直连模式`);
+  logger.debug(`使用直连模式`, { module: 'RequestHandler' });
 
   try {
     const controller = new AbortController();
@@ -449,7 +449,7 @@ async function sendRequestDirect(request: ProxyRequest): Promise<{
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
-    logger.requestHandler.error(`直连请求失败: ${errorMessage}`);
+    logger.error(`直连请求失败: ${errorMessage}`, error instanceof Error ? error : undefined, { module: 'RequestHandler' });
     return {
       success: false,
       error: errorMessage,
@@ -471,11 +471,13 @@ export async function sendProxyRequest(
   const useFallback = options.useFallback !== false;
 
   const urlObj = new URL(request.url);
-  logger.requestHandler.info(
+  logger.info(
     `开始处理请求: ${request.method} ${urlObj.hostname}`,
+    { module: 'RequestHandler' }
   );
-  logger.requestHandler.verbose(
+  logger.debug(
     `最大代理尝试次数: ${maxProxyAttempts}, Fallback: ${useFallback}`,
+    { module: 'RequestHandler' }
   );
 
   // 1. 尝试使用代理
@@ -483,16 +485,16 @@ export async function sendProxyRequest(
     const proxy = await getAvailableProxy();
 
     if (!proxy) {
-      logger.requestHandler.warn(`没有可用代理`);
+      logger.warn(`没有可用代理`, { module: 'RequestHandler' });
       break;
     }
 
-    logger.requestHandler.verbose(`代理尝试 ${attempt + 1}/${maxProxyAttempts}`);
+    logger.debug(`代理尝试 ${attempt + 1}/${maxProxyAttempts}`, { module: 'RequestHandler' });
 
     const result = await sendRequestWithProxy(request, proxy);
 
     if (result.success) {
-      logger.requestHandler.info(`代理请求成功`);
+      logger.info(`代理请求成功`, { module: 'RequestHandler' });
       reportProxySuccess(proxy);
 
       return {
@@ -506,19 +508,19 @@ export async function sendProxyRequest(
         fallbackUsed: false,
       };
     } else {
-      logger.requestHandler.warn(`代理请求失败`);
+      logger.warn(`代理请求失败`, { module: 'RequestHandler' });
       reportProxyFailed(proxy);
     }
   }
 
   // 2. 所有代理失败，尝试 Fallback
   if (useFallback) {
-    logger.requestHandler.info(`所有代理失败，尝试直连`);
+    logger.info(`所有代理失败，尝试直连`, { module: 'RequestHandler' });
 
     const result = await sendRequestDirect(request);
 
     if (result.success) {
-      logger.requestHandler.info(`直连成功`);
+      logger.info(`直连成功`, { module: 'RequestHandler' });
 
       return {
         success: true,
@@ -531,7 +533,7 @@ export async function sendProxyRequest(
         fallbackUsed: true,
       };
     } else {
-      logger.requestHandler.error(`直连失败`);
+      logger.error(`直连失败`, undefined, { module: 'RequestHandler' });
 
       return {
         success: false,
@@ -561,9 +563,9 @@ export async function sendProxyRequest(
  * @returns 代理列表
  */
 async function getProxiesForRequest(count: number): Promise<ProxyInfo[]> {
-  logger.requestHandler.verbose(`并行尝试最多 ${count} 个代理`);
+  logger.debug(`并行尝试最多 ${count} 个代理`, { module: 'RequestHandler' });
   const proxies = await getMultipleProxies(count);
-  logger.requestHandler.verbose(`获取到 ${proxies.length} 个代理`);
+  logger.debug(`获取到 ${proxies.length} 个代理`, { module: 'RequestHandler' });
   return proxies;
 }
 
@@ -577,7 +579,7 @@ async function handleNoProxies(
   request: ProxyRequest,
   useFallback: boolean,
 ): Promise<ProxyResponse> {
-  logger.requestHandler.warn(`没有可用代理`);
+  logger.warn(`没有可用代理`, { module: 'RequestHandler' });
 
   if (!useFallback) {
     return {
@@ -614,7 +616,7 @@ function buildSuccessResponse(
   result: { data?: string; status?: number; headers?: Record<string, string> },
   proxy: ProxyInfo,
 ): ProxyResponse {
-  logger.requestHandler.info(`代理请求成功: ${proxy.ip}:***`);
+  logger.info(`代理请求成功: ${proxy.ip}:***`, { module: 'RequestHandler' });
   reportProxySuccess(proxy);
 
   return {
@@ -650,7 +652,7 @@ async function handleAllProxiesFailed(
     };
   }
 
-  logger.requestHandler.info(`所有代理失败，回退到直连`);
+  logger.info(`所有代理失败，回退到直连`, { module: 'RequestHandler' });
   const directResult = await sendRequestDirect(request);
 
   return {
@@ -688,7 +690,7 @@ async function attemptProxyRequest(
   abortSignal: AbortSignal,
   abortOthers: () => void,
 ): Promise<ProxyAttemptResult> {
-  logger.requestHandler.verbose(`开始尝试代理: ${proxy.ip}:***`);
+  logger.debug(`开始尝试代理: ${proxy.ip}:***`, { module: 'RequestHandler' });
 
   try {
     const result = await sendRequestWithProxy(request, proxy, abortSignal);
@@ -700,18 +702,18 @@ async function attemptProxyRequest(
         response: buildSuccessResponse(result, proxy),
       };
     } else {
-      logger.requestHandler.verbose(`代理请求失败: ${proxy.ip}:*** - ${result.error}`);
+      logger.debug(`代理请求失败: ${proxy.ip}:*** - ${result.error}`, { module: 'RequestHandler' });
       reportProxyFailed(proxy);
       return { success: false, response: null };
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      logger.requestHandler.verbose(`代理请求被取消: ${proxy.ip}:***`);
+      logger.debug(`代理请求被取消: ${proxy.ip}:***`, { module: 'RequestHandler' });
       return { success: false, response: null };
     }
 
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    logger.requestHandler.error(`代理请求异常: ${proxy.ip}:*** - ${errorMessage}`);
+    logger.error(`代理请求异常: ${proxy.ip}:*** - ${errorMessage}`, error instanceof Error ? error : undefined, { module: 'RequestHandler' });
     reportProxyFailed(proxy);
     return { success: false, response: null };
   }
@@ -727,7 +729,7 @@ async function raceProxies(
   request: ProxyRequest,
   proxies: ProxyInfo[],
 ): Promise<ProxyResponse | null> {
-  logger.requestHandler.verbose(`开始并行尝试 ${proxies.length} 个代理`);
+  logger.debug(`开始并行尝试 ${proxies.length} 个代理`, { module: 'RequestHandler' });
 
   const abortControllers = proxies.map(() => new AbortController());
 
@@ -736,7 +738,7 @@ async function raceProxies(
       abortControllers.forEach((ctrl, i) => {
         if (i !== index) {
           ctrl.abort();
-          logger.requestHandler.verbose(`已取消代理 ${i} 的请求`);
+          logger.debug(`已取消代理 ${i} 的请求`, { module: 'RequestHandler' });
         }
       });
     };
@@ -752,10 +754,10 @@ async function raceProxies(
       }))
     );
 
-    logger.requestHandler.info(`竞速成功`);
+    logger.info(`竞速成功`, { module: 'RequestHandler' });
     return result;
   } catch {
-    logger.requestHandler.warn(`所有 ${proxies.length} 个代理都失败`);
+    logger.warn(`所有 ${proxies.length} 个代理都失败`, { module: 'RequestHandler' });
     return null;
   }
 }

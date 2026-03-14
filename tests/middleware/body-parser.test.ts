@@ -9,8 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { bodyParserMiddleware } from '../../api/middleware/body-parser.js';
-import type { MiddlewareContext, RequestBody } from '../../api/middleware/types.js';
+import { bodyParserMiddleware } from '../../src/middleware/body-parser.js';
+import type { MiddlewareContext, RequestBody } from '../../src/middleware/types.js';
 
 /**
  * 创建模拟的中间件上下文

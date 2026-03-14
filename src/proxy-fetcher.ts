@@ -118,8 +118,9 @@ export async function fetchAllProxies(): Promise<ProxyInfo[]> {
     cachedProxies.length > 0 &&
     now - lastFetchTime < PROXY_CONFIG.pool.refreshInterval
   ) {
-    logger.proxyFetcher.verbose(
+    logger.debug(
       `使用缓存的代理列表，共 ${cachedProxies.length} 个`,
+      { module: 'ProxyFetcher' }
     );
     return cachedProxies;
   }
@@ -130,12 +131,13 @@ export async function fetchAllProxies(): Promise<ProxyInfo[]> {
   const fetchPromises = PROXY_SOURCES.map(async (source) => {
     try {
       const proxies = await fetchFromSource(source);
-      logger.proxyFetcher.verbose(
+      logger.debug(
         `从 ${source.name} 获取了 ${proxies.length} 个代理`,
+        { module: 'ProxyFetcher' }
       );
       return proxies;
     } catch (error) {
-      logger.proxyFetcher.error(`从 ${source.name} 获取失败`, { error: error instanceof Error ? error.message : String(error) });
+      logger.error(`从 ${source.name} 获取失败`, error instanceof Error ? error : undefined, { module: 'ProxyFetcher' });
       return [];
     }
   });
@@ -154,7 +156,7 @@ export async function fetchAllProxies(): Promise<ProxyInfo[]> {
   cachedProxies = uniqueProxies;
   lastFetchTime = now;
 
-  logger.proxyFetcher.info(`总共获取 ${uniqueProxies.length} 个唯一代理`);
+  logger.info(`总共获取 ${uniqueProxies.length} 个唯一代理`, { module: 'ProxyFetcher' });
 
   return uniqueProxies;
 }
@@ -191,7 +193,7 @@ async function fetchFromSource(
       .map((proxy) => {
         const parts = proxy.split(":");
         if (parts.length < 2) {
-          logger.proxyFetcher.warn(`无效的代理格式: ${proxy}`);
+          logger.warn(`无效的代理格式: ${proxy}`, { module: 'ProxyFetcher' });
           return null;
         }
         const [ip, port] = parts;
@@ -199,7 +201,7 @@ async function fetchFromSource(
         // 验证代理信息
         const validation = validateProxyInfo(ip, port);
         if (!validation.valid) {
-          logger.proxyFetcher.warn(`无效的代理 ${proxy}: ${validation.error}`);
+          logger.warn(`无效的代理 ${proxy}: ${validation.error}`, { module: 'ProxyFetcher' });
           return null;
         }
         
@@ -217,7 +219,7 @@ async function fetchFromSource(
       .filter((p): p is ProxyInfo => p !== null);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      logger.proxyFetcher.warn(`获取超时: ${source.name}`);
+      logger.warn(`获取超时: ${source.name}`, { module: 'ProxyFetcher' });
     }
     throw error;
   }

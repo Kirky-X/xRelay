@@ -9,8 +9,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { compose, respond, when } from '../../api/middleware/compose.js';
-import type { Middleware, MiddlewareContext } from '../../api/middleware/types.js';
+import { compose, respond, when } from '../../src/middleware/compose.js';
+import type { Middleware, MiddlewareContext } from '../../src/middleware/types.js';
 
 /**
  * 创建模拟的中间件上下文

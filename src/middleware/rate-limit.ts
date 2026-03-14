@@ -3,8 +3,10 @@
  * License: MIT
  */
 
+import type { VercelRequest } from "@vercel/node";
 import type { Middleware, MiddlewareContext } from "./types.js";
 import { checkGlobalRateLimit, checkIpRateLimit } from "../rate-limiter.js";
+import { FEATURES } from "../config.js";
 
 /**
  * 限流配置
@@ -13,6 +15,118 @@ export interface RateLimitConfig {
   enabled: boolean;
   enableGlobalLimit: boolean;
   enableIpLimit: boolean;
+}
+
+/**
+ * 限流检查结果
+ */
+export interface RateLimitResult {
+  allowed: boolean;
+  remaining: number;
+  resetAt: number;
+}
+
+/**
+ * 从 Vercel 请求中获取客户端 IP
+ * @param req Vercel 请求对象
+ * @returns 客户端 IP 地址
+ */
+export function getClientIp(req: VercelRequest): string {
+  // 尝试从各种 headers 中获取真实 IP
+  const forwardedFor = req.headers["x-forwarded-for"];
+  if (forwardedFor) {
+    const ips = Array.isArray(forwardedFor)
+      ? forwardedFor[0]
+      : forwardedFor.split(",")[0];
+    return ips.trim();
+  }
+
+  const realIp = req.headers["x-real-ip"];
+  if (realIp) {
+    return Array.isArray(realIp) ? realIp[0] : realIp;
+  }
+
+  // Vercel 提供的 IP
+  const vercelIp = (req as VercelRequest & { ip?: string }).ip;
+  if (vercelIp) {
+    return vercelIp;
+  }
+
+  // 默认返回 unknown
+  return "unknown";
+}
+
+/**
+ * 检查限流（适配 Vercel API 入口）
+ * @param clientIp 客户端 IP 地址
+ * @returns 限流检查结果
+ */
+export async function checkRateLimitForIp(
+  clientIp: string
+): Promise<RateLimitResult> {
+  if (!FEATURES.enableRateLimit) {
+    return {
+      allowed: true,
+      remaining: 100,
+      resetAt: Date.now() + 60000,
+    };
+  }
+
+  const result = await checkIpRateLimit(clientIp);
+  return {
+    allowed: result.allowed,
+    remaining: result.remaining,
+    resetAt: Date.now() + result.resetIn,
+  };
+}
+
+// 模块级限流存储
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+/**
+ * 同步版本的限流检查（用于简单场景）
+ * 注意：此函数返回一个 Promise 的占位结果，实际限流检查是异步的
+ * @param clientIp 客户端 IP 地址
+ * @returns 限流检查结果
+ */
+export function checkRateLimit(clientIp: string): RateLimitResult {
+  // 简单的内存限流（用于无 KV 环境的降级方案）
+  const RATE_LIMIT_WINDOW = 60000; // 1 分钟
+  const RATE_LIMIT_MAX = 100;
+
+  const now = Date.now();
+  const record = rateLimitStore.get(clientIp);
+
+  if (!record || now > record.resetAt) {
+    // 创建新窗口
+    const newRecord = {
+      count: 1,
+      resetAt: now + RATE_LIMIT_WINDOW,
+    };
+    rateLimitStore.set(clientIp, newRecord);
+    return {
+      allowed: true,
+      remaining: RATE_LIMIT_MAX - 1,
+      resetAt: newRecord.resetAt,
+    };
+  }
+
+  // 在当前窗口内
+  if (record.count >= RATE_LIMIT_MAX) {
+    return {
+      allowed: false,
+      remaining: 0,
+      resetAt: record.resetAt,
+    };
+  }
+
+  // 增加计数
+  record.count++;
+  return {
+    allowed: true,
+    remaining: RATE_LIMIT_MAX - record.count,
+    resetAt: record.resetAt,
+  };
 }
 
 /**

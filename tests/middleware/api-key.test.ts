@@ -9,8 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { apiKeyMiddleware } from '../../api/middleware/api-key.js';
-import type { MiddlewareContext } from '../../api/middleware/types.js';
+import { apiKeyMiddleware } from '../../src/middleware/api-key.js';
+import type { MiddlewareContext } from '../../src/middleware/types.js';
 
 /**
  * 创建模拟的中间件上下文

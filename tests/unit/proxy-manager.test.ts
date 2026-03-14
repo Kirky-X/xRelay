@@ -11,13 +11,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock dependencies - 必须在导入前设置
-vi.mock('../../api/database/connection.js', () => ({
+vi.mock('../../src/database/connection.js', () => ({
   initDatabase: vi.fn(() => Promise.resolve(false)),
   isDatabaseReady: vi.fn(() => false),
   getPool: vi.fn(() => null),
 }));
 
-vi.mock('../../api/proxy-fetcher.js', () => ({
+vi.mock('../../src/proxy-fetcher.js', () => ({
   fetchAllProxies: vi.fn(() => Promise.resolve([
     { ip: '1.2.3.4', port: '8080', source: 'test', timestamp: Date.now() },
     { ip: '5.6.7.8', port: '8080', source: 'test', timestamp: Date.now() },
@@ -25,13 +25,13 @@ vi.mock('../../api/proxy-fetcher.js', () => ({
   ])),
 }));
 
-vi.mock('../../api/proxy-tester.js', () => ({
+vi.mock('../../src/proxy-tester.js', () => ({
   quickTestProxies: vi.fn((proxies: any[]) => Promise.resolve(proxies)),
   cleanupBlacklist: vi.fn(),
   getBlacklistStatus: vi.fn(() => ({ size: 0, samples: [] })),
 }));
 
-vi.mock('../../api/database/available-proxies-dao.js', () => ({
+vi.mock('../../src/database/available-proxies-dao.js', () => ({
   upsertProxy: vi.fn(),
   getAllProxies: vi.fn(() => Promise.resolve([])),
   getProxyCount: vi.fn(() => Promise.resolve(0)),
@@ -42,13 +42,13 @@ vi.mock('../../api/database/available-proxies-dao.js', () => ({
   getWeightedProxies: vi.fn(() => Promise.resolve([])),
 }));
 
-vi.mock('../../api/database/deprecated-proxies-dao.js', () => ({
+vi.mock('../../src/database/deprecated-proxies-dao.js', () => ({
   insertDeprecatedProxy: vi.fn(),
   isProxyDeprecated: vi.fn(() => Promise.resolve(false)),
   getAllDeprecatedProxies: vi.fn(() => Promise.resolve([])),
 }));
 
-vi.mock('../../api/config.js', () => ({
+vi.mock('../../src/config.js', () => ({
   PROXY_CONFIG: {
     pool: {
       maxProxyCount: 100,
@@ -68,7 +68,7 @@ vi.mock('../../api/config.js', () => ({
   },
 }));
 
-vi.mock('../../api/logger.js', () => ({
+vi.mock('../../src/logger.js', () => ({
   logger: {
     proxyManager: {
       info: vi.fn(),
@@ -91,7 +91,7 @@ import {
   getCircuitBreakerStatus,
   manualRefresh,
   getProxyStats,
-} from '../../api/proxy-manager.js';
+} from '../../src/proxy-manager.js';
 
 describe('Proxy Manager - 初始化', () => {
   beforeEach(() => {
@@ -106,7 +106,7 @@ describe('Proxy Manager - 初始化', () => {
 
   it('应该正确初始化代理管理器（内存模式）', async () => {
     // 重新导入以获取新的模块实例
-    const { initProxyManager, isUsingDatabase } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, isUsingDatabase } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -115,13 +115,13 @@ describe('Proxy Manager - 初始化', () => {
   });
 
   it('应该防止重复初始化', async () => {
-    const { initProxyManager } = await import('../../api/proxy-manager.js');
+    const { initProxyManager } = await import('../../src/proxy-manager.js');
     
     // 第一次初始化
     await initProxyManager();
     
     // 第二次初始化应该直接返回，不执行任何操作
-    const { fetchAllProxies } = await import('../../api/proxy-fetcher.js');
+    const { fetchAllProxies } = await import('../../src/proxy-fetcher.js');
     const callCountBefore = vi.mocked(fetchAllProxies).mock.calls.length;
     
     await initProxyManager();
@@ -132,13 +132,13 @@ describe('Proxy Manager - 初始化', () => {
 
   it('初始化失败时应该降级到内存模式', async () => {
     // 模拟初始化过程中的错误
-    const { fetchAllProxies } = await import('../../api/proxy-fetcher.js');
+    const { fetchAllProxies } = await import('../../src/proxy-fetcher.js');
     vi.mocked(fetchAllProxies).mockRejectedValueOnce(new Error('Network error'));
     
     // 重新导入模块以测试错误处理
     vi.resetModules();
     
-    const { initProxyManager, isUsingDatabase } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, isUsingDatabase } = await import('../../src/proxy-manager.js');
     
     // 即使出错也应该完成初始化
     await initProxyManager();
@@ -155,7 +155,7 @@ describe('Proxy Manager - 代理获取', () => {
   });
 
   it('应该返回可用代理', async () => {
-    const { initProxyManager, getAvailableProxy } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getAvailableProxy } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -166,7 +166,7 @@ describe('Proxy Manager - 代理获取', () => {
   });
 
   it('应该返回多个代理', async () => {
-    const { initProxyManager, getMultipleProxies } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getMultipleProxies } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -176,7 +176,7 @@ describe('Proxy Manager - 代理获取', () => {
   });
 
   it('请求的代理数量超过可用数量时应该返回所有可用代理', async () => {
-    const { initProxyManager, getMultipleProxies } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getMultipleProxies } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -191,17 +191,17 @@ describe('Proxy Manager - 代理获取', () => {
     // 模拟空的代理列表
     vi.resetModules();
     
-    vi.doMock('../../api/proxy-fetcher.js', () => ({
+    vi.doMock('../../src/proxy-fetcher.js', () => ({
       fetchAllProxies: vi.fn(() => Promise.resolve([])),
     }));
     
-    vi.doMock('../../api/proxy-tester.js', () => ({
+    vi.doMock('../../src/proxy-tester.js', () => ({
       quickTestProxies: vi.fn(() => Promise.resolve([])),
       cleanupBlacklist: vi.fn(),
       getBlacklistStatus: vi.fn(() => ({ size: 0, samples: [] })),
     }));
     
-    const { initProxyManager, getAvailableProxy } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getAvailableProxy } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -213,7 +213,7 @@ describe('Proxy Manager - 代理获取', () => {
   it('获取代理前应该确保已初始化', async () => {
     vi.resetModules();
     
-    const { getAvailableProxy, isUsingDatabase } = await import('../../api/proxy-manager.js');
+    const { getAvailableProxy, isUsingDatabase } = await import('../../src/proxy-manager.js');
     
     // 不先调用 initProxyManager，直接获取代理
     const proxy = await getAvailableProxy();
@@ -230,7 +230,7 @@ describe('Proxy Manager - 失败报告', () => {
   });
 
   it('应该正确报告代理失败', async () => {
-    const { initProxyManager, reportProxyFailed, getPoolStatus } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, reportProxyFailed, getPoolStatus } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -243,7 +243,7 @@ describe('Proxy Manager - 失败报告', () => {
   });
 
   it('报告失败后应该更新断路器状态', async () => {
-    const { initProxyManager, reportProxyFailed, getCircuitBreakerStatus } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, reportProxyFailed, getCircuitBreakerStatus } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -259,7 +259,7 @@ describe('Proxy Manager - 失败报告', () => {
   });
 
   it('失败报告应该从内存池中移除代理', async () => {
-    const { initProxyManager, getMultipleProxies, reportProxyFailed } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getMultipleProxies, reportProxyFailed } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -291,7 +291,7 @@ describe('Proxy Manager - 成功报告', () => {
   });
 
   it('应该正确报告代理成功', async () => {
-    const { initProxyManager, reportProxySuccess, getCircuitBreakerStatus } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, reportProxySuccess, getCircuitBreakerStatus } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -323,7 +323,7 @@ describe('Proxy Manager - 断路器', () => {
   });
 
   it('应该跟踪断路器状态', async () => {
-    const { initProxyManager, getCircuitBreakerStatus } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getCircuitBreakerStatus } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -334,7 +334,7 @@ describe('Proxy Manager - 断路器', () => {
   });
 
   it('连续失败达到阈值后应该打开断路器', async () => {
-    const { initProxyManager, reportProxyFailed, getCircuitBreakerStatus } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, reportProxyFailed, getCircuitBreakerStatus } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -355,7 +355,7 @@ describe('Proxy Manager - 断路器', () => {
   });
 
   it('断路器打开后代理应该不可用', async () => {
-    const { initProxyManager, reportProxyFailed, getAvailableProxy } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, reportProxyFailed, getAvailableProxy } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -376,7 +376,7 @@ describe('Proxy Manager - 断路器', () => {
   });
 
   it('成功后应该重置断路器', async () => {
-    const { initProxyManager, reportProxyFailed, reportProxySuccess, getCircuitBreakerStatus } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, reportProxyFailed, reportProxySuccess, getCircuitBreakerStatus } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -408,7 +408,7 @@ describe('Proxy Manager - 池状态', () => {
   });
 
   it('应该返回正确的池状态', async () => {
-    const { initProxyManager, getPoolStatus } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getPoolStatus } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -424,7 +424,7 @@ describe('Proxy Manager - 池状态', () => {
   });
 
   it('应该返回正确的代理统计信息', async () => {
-    const { initProxyManager, getProxyStats } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getProxyStats } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -447,7 +447,7 @@ describe('Proxy Manager - 手动刷新', () => {
   });
 
   it('应该支持手动刷新代理池', async () => {
-    const { initProxyManager, manualRefresh, getPoolStatus } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, manualRefresh, getPoolStatus } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -469,7 +469,7 @@ describe('Proxy Manager - 边界情况', () => {
   });
 
   it('获取 0 个代理应该返回空数组', async () => {
-    const { initProxyManager, getMultipleProxies } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getMultipleProxies } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -479,7 +479,7 @@ describe('Proxy Manager - 边界情况', () => {
   });
 
   it('获取负数个代理应该返回空数组', async () => {
-    const { initProxyManager, getMultipleProxies } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getMultipleProxies } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -489,7 +489,7 @@ describe('Proxy Manager - 边界情况', () => {
   });
 
   it('报告不存在的代理失败不应该抛出错误', async () => {
-    const { initProxyManager, reportProxyFailed } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, reportProxyFailed } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -505,7 +505,7 @@ describe('Proxy Manager - 边界情况', () => {
   });
 
   it('报告不存在的代理成功不应该抛出错误', async () => {
-    const { initProxyManager, reportProxySuccess } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, reportProxySuccess } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     
@@ -528,7 +528,7 @@ describe('Proxy Manager - 并发安全', () => {
   });
 
   it('并发初始化应该只执行一次', async () => {
-    const { initProxyManager, isUsingDatabase } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, isUsingDatabase } = await import('../../src/proxy-manager.js');
     
     // 并发调用初始化
     const promises = [
@@ -544,7 +544,7 @@ describe('Proxy Manager - 并发安全', () => {
   });
 
   it('并发获取代理应该正常工作', async () => {
-    const { initProxyManager, getAvailableProxy } = await import('../../api/proxy-manager.js');
+    const { initProxyManager, getAvailableProxy } = await import('../../src/proxy-manager.js');
     
     await initProxyManager();
     

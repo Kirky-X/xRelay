@@ -3,122 +3,124 @@
  * License: MIT
  */
 
-/**
- * Logger - 统一日志模块
- * 提供结构化日志输出，支持不同日志级别
- */
-
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LogEntry {
   timestamp: string;
   level: LogLevel;
-  module: string;
   message: string;
-  [key: string]: unknown;
-}
-
-/**
- * 检查是否启用详细日志
- */
-function isVerboseLogging(): boolean {
-  return process.env.NODE_ENV !== 'production' || 
-         process.env.ENABLE_VERBOSE_LOGGING === 'true';
-}
-
-/**
- * 格式化日志条目
- */
-function formatEntry(entry: LogEntry): string {
-  const { timestamp, level, module, message, ...rest } = entry;
-  const extra = Object.keys(rest).length > 0 ? rest : undefined;
-  
-  // 生产环境使用 JSON 格式，开发环境使用可读格式
-  if (process.env.NODE_ENV === 'production') {
-    return JSON.stringify({ timestamp, level, module, message, ...extra });
-  }
-  
-  // 开发环境：简洁可读格式
-  const levelStr = level.toUpperCase().padEnd(5);
-  const extraStr = extra ? ` ${JSON.stringify(extra)}` : '';
-  return `[${timestamp}] ${levelStr} [${module}] ${message}${extraStr}`;
-}
-
-/**
- * 创建日志器
- */
-export function createLogger(module: string) {
-  return {
-    debug(message: string, data?: Record<string, unknown>): void {
-      if (!isVerboseLogging()) return;
-      const entry: LogEntry = {
-        timestamp: new Date().toISOString(),
-        level: 'debug',
-        module,
-        message,
-        ...data,
-      };
-      console.log(formatEntry(entry));
-    },
-
-    info(message: string, data?: Record<string, unknown>): void {
-      const entry: LogEntry = {
-        timestamp: new Date().toISOString(),
-        level: 'info',
-        module,
-        message,
-        ...data,
-      };
-      console.log(formatEntry(entry));
-    },
-
-    warn(message: string, data?: Record<string, unknown>): void {
-      const entry: LogEntry = {
-        timestamp: new Date().toISOString(),
-        level: 'warn',
-        module,
-        message,
-        ...data,
-      };
-      console.warn(formatEntry(entry));
-    },
-
-    error(message: string, data?: Record<string, unknown>): void {
-      const entry: LogEntry = {
-        timestamp: new Date().toISOString(),
-        level: 'error',
-        module,
-        message,
-        ...data,
-      };
-      console.error(formatEntry(entry));
-    },
-
-    /**
-     * 仅在详细日志模式下输出
-     */
-    verbose(message: string, data?: Record<string, unknown>): void {
-      if (!isVerboseLogging()) return;
-      this.debug(message, data);
-    },
+  requestId?: string;
+  context?: Record<string, unknown>;
+  error?: {
+    name: string;
+    message: string;
+    stack?: string;
   };
+  duration?: number;
 }
 
-// 预创建常用模块的日志器
-export const logger = {
-  main: createLogger('Main'),
-  cache: createLogger('Cache'),
-  config: createLogger('Config'),
-  cron: createLogger('Cron'),
-  database: createLogger('Database'),
-  kv: createLogger('KV'),
-  proxyManager: createLogger('ProxyManager'),
-  proxyFetcher: createLogger('ProxyFetcher'),
-  proxyTester: createLogger('ProxyTester'),
-  requestHandler: createLogger('RequestHandler'),
-  rateLimit: createLogger('RateLimit'),
-  security: createLogger('Security'),
-  middleware: createLogger('Middleware'),
-  cleanup: createLogger('Cleanup'),
-  migration: createLogger('Migration'),
-};
+class Logger {
+  private service = 'xRelay';
+  private version = '1.0.0';
+  private environment = process.env.NODE_ENV || 'production';
+
+  private format(entry: LogEntry): string {
+    return JSON.stringify(entry);
+  }
+
+  private getTimestamp(): string {
+    return new Date().toISOString();
+  }
+
+  debug(message: string, context?: Record<string, unknown>): void {
+    if (process.env.DEBUG === 'true') {
+      this.log('debug', message, context);
+    }
+  }
+
+  info(message: string, context?: Record<string, unknown>): void {
+    this.log('info', message, context);
+  }
+
+  warn(message: string, context?: Record<string, unknown>): void {
+    this.log('warn', message, context);
+  }
+
+  error(message: string, error?: Error, context?: Record<string, unknown>): void {
+    const entry: LogEntry = {
+      timestamp: this.getTimestamp(),
+      level: 'error',
+      message,
+      context: {
+        service: this.service,
+        version: this.version,
+        environment: this.environment,
+        ...context,
+      },
+    };
+
+    if (error) {
+      entry.error = {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      };
+    }
+
+    console.error(this.format(entry));
+  }
+
+  private log(level: LogLevel, message: string, context?: Record<string, unknown>): void {
+    const entry: LogEntry = {
+      timestamp: this.getTimestamp(),
+      level,
+      message,
+      context: {
+        service: this.service,
+        version: this.version,
+        environment: this.environment,
+        ...context,
+      },
+    };
+
+    console.log(this.format(entry));
+  }
+
+  // Performance logging
+  logPerformance(operation: string, duration: number, metadata?: Record<string, unknown>): void {
+    this.info(`Performance: ${operation}`, {
+      duration_ms: duration,
+      ...metadata,
+    });
+  }
+
+  // Request logging
+  logRequest(requestId: string, method: string, url: string, statusCode: number, duration: number): void {
+    this.info('Request completed', {
+      requestId,
+      method,
+      url: this.sanitizeUrl(url),
+      statusCode,
+      duration_ms: duration,
+    });
+  }
+
+  // Sanitize URL for logging (remove sensitive query params)
+  private sanitizeUrl(url: string): string {
+    try {
+      const parsed = new URL(url);
+      // Remove sensitive query parameters
+      const sensitiveParams = ['token', 'key', 'secret', 'password', 'api_key'];
+      for (const param of sensitiveParams) {
+        if (parsed.searchParams.has(param)) {
+          parsed.searchParams.set(param, '[REDACTED]');
+        }
+      }
+      return parsed.toString();
+    } catch {
+      return url;
+    }
+  }
+}
+
+export const logger = new Logger();

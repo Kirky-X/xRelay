@@ -385,7 +385,11 @@ export async function resolveDns(hostname: string): Promise<string[]> {
 
     return ips;
   } catch (error) {
-    logger.security.error(`DNS 解析失败: ${hostname}`, { error: error instanceof Error ? error.message : String(error) });
+    logger.error(
+      `DNS 解析失败: ${hostname}`,
+      error instanceof Error ? error : undefined,
+      { module: 'Security' }
+    );
     return [];
   }
 }
@@ -454,7 +458,7 @@ export function validateProxyPort(port: string | number): { valid: boolean; port
   
   // 警告：特权端口通常不应作为代理端口
   if (portNum < 1024) {
-    logger.security.warn(`端口号 ${portNum} 是特权端口，通常不应用作代理端口`);
+    logger.warn(`端口号 ${portNum} 是特权端口，通常不应用作代理端口`, { module: 'Security' });
   }
   
   return { valid: true, port: portNum };
