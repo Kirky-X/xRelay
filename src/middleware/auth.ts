@@ -47,6 +47,39 @@ export function validateApiKey(req: VercelRequest): void {
 }
 
 /**
+ * 验证 API Key（标准 Request 版本，用于 Bun 等运行时）
+ * @param request 标准 Request 对象
+ * @throws AppError 如果 API Key 无效
+ */
+export function validateApiKeyFromRequest(request: Request): void {
+  if (!API_KEY_CONFIG.enabled) {
+    return;
+  }
+
+  if (API_KEY_CONFIG.keys.length === 0) {
+    console.error("[Auth] API Key verification enabled but no keys configured");
+    throw createInvalidApiKeyError();
+  }
+
+  const providedKey = request.headers.get(API_KEY_CONFIG.headerName);
+
+  if (!providedKey) {
+    throw createInvalidApiKeyError();
+  }
+
+  let matched = false;
+  for (const key of API_KEY_CONFIG.keys) {
+    if (timingSafeEqualString(providedKey, key)) {
+      matched = true;
+    }
+  }
+
+  if (!matched) {
+    throw createInvalidApiKeyError();
+  }
+}
+
+/**
  * 从请求中提取 API Key
  * @param req Vercel 请求对象
  * @returns API Key 或 undefined

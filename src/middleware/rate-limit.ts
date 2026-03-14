@@ -57,6 +57,32 @@ export function getClientIp(req: VercelRequest): string {
 }
 
 /**
+ * 从标准 Request 对象中获取客户端 IP（用于 Bun 等运行时）
+ * @param request 标准 Request 对象
+ * @returns 客户端 IP 地址
+ */
+export function getClientIpFromRequest(request: Request): string {
+  // 尝试从各种 headers 中获取真实 IP
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  if (forwardedFor) {
+    return forwardedFor.split(",")[0].trim();
+  }
+
+  const realIp = request.headers.get("x-real-ip");
+  if (realIp) {
+    return realIp;
+  }
+
+  const cfConnectingIp = request.headers.get("cf-connecting-ip");
+  if (cfConnectingIp) {
+    return cfConnectingIp;
+  }
+
+  // 默认返回 unknown
+  return "unknown";
+}
+
+/**
  * 检查限流（适配 Vercel API 入口）
  * @param clientIp 客户端 IP 地址
  * @returns 限流检查结果
