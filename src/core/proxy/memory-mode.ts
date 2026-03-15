@@ -95,7 +95,7 @@ export async function getAvailableProxyFromMemory(): Promise<ProxyInfo | null> {
     if (availableProxies.length > 0) {
       const proxy =
         availableProxies[
-          Math.floor(Math.random() * availableProxies.length)
+        Math.floor(Math.random() * availableProxies.length)
         ];
       logger.debug(`获取代理: ${proxy.ip}:***`, { module: 'ProxyManager' });
       return proxy;

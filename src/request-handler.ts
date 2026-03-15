@@ -94,13 +94,13 @@ async function retryWithBackoff<T>(
   baseDelay: number
 ): Promise<T> {
   let lastError: Error | undefined;
-  
+
   for (let i = 0; i < maxRetries; i++) {
     try {
       return await fn();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
+
       if (i < maxRetries - 1) {
         const delay = Math.min(baseDelay * Math.pow(2, i), RETRY_CONFIG.maxDelay);
         logger.debug(`重试 ${i + 1}/${maxRetries}，等待 ${delay}ms 后重试`, { module: 'RequestHandler' });
@@ -108,7 +108,7 @@ async function retryWithBackoff<T>(
       }
     }
   }
-  
+
   throw lastError;
 }
 
@@ -161,43 +161,43 @@ const DANGEROUS_HEADERS = new Set([
  */
 export function filterDangerousHeaders(headers: Record<string, string>): Record<string, string> {
   const filtered: Record<string, string> = {};
-  
+
   for (const [key, value] of Object.entries(headers)) {
     const lowerKey = key.toLowerCase();
-    
+
     // 检查是否为危险 header
     if (DANGEROUS_HEADERS.has(lowerKey)) {
       logger.debug(`过滤危险 header: ${key}`, { module: 'RequestHandler' });
       continue;
     }
-    
+
     // 验证 header 名称：不允许包含控制字符和特殊字符
     if (!key.match(/^[a-zA-Z0-9!#$%&'*+-.^_`|~]+$/)) {
       logger.debug(`过滤无效 header 名称: ${key}`, { module: 'RequestHandler' });
       continue;
     }
-    
+
     // 验证 header 值：防止 CRLF 注入
     if (typeof value !== 'string') {
       logger.debug(`过滤非字符串 header 值: ${key}`, { module: 'RequestHandler' });
       continue;
     }
-    
+
     // 检查是否包含换行符（CRLF 注入防护）
     if (value.includes('\r') || value.includes('\n')) {
       logger.debug(`过滤包含换行符的 header 值: ${key}`, { module: 'RequestHandler' });
       continue;
     }
-    
+
     // 检查是否包含空字节
     if (value.includes('\0')) {
       logger.debug(`过滤包含空字节的 header 值: ${key}`, { module: 'RequestHandler' });
       continue;
     }
-    
+
     filtered[key] = value;
   }
-  
+
   return filtered;
 }
 
@@ -322,7 +322,7 @@ async function sendRequestWithProxy(
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
     logger.error(`代理请求失败: ${errorMessage}`, error instanceof Error ? error : undefined, { module: 'RequestHandler' });
-    
+
     return {
       success: false,
       error: errorMessage,
@@ -389,17 +389,17 @@ async function sendRequestDirect(request: ProxyRequest): Promise<{
     // 使用流式读取响应体，并限制大小
     const reader = response.body?.getReader();
     let text = '';
-    
+
     if (reader) {
       const chunks: Uint8Array[] = [];
       let totalSize = 0;
-      
+
       try {
         while (true) {
           const { done, value } = await reader.read();
-          
+
           if (done) break;
-          
+
           totalSize += value.length;
           if (totalSize > MAX_RESPONSE_SIZE) {
             reader.cancel();
@@ -408,10 +408,10 @@ async function sendRequestDirect(request: ProxyRequest): Promise<{
               error: `Response body exceeds ${MAX_RESPONSE_SIZE} bytes`,
             };
           }
-          
+
           chunks.push(value);
         }
-        
+
         // 合并所有 chunks 并转换为字符串
         const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
         const combinedArray = new Uint8Array(totalLength);
@@ -420,7 +420,7 @@ async function sendRequestDirect(request: ProxyRequest): Promise<{
           combinedArray.set(chunk, offset);
           offset += chunk.length;
         }
-        
+
         text = new TextDecoder('utf-8').decode(combinedArray);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
