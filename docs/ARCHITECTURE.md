@@ -146,7 +146,7 @@ The entry point for all requests. It runs on Vercel's Edge Runtime, ensuring low
   - Response formatting
   - Error handling
 
-### 2️⃣ Database Layer (`lib/database/`)
+### 2️⃣ Database Layer (`src/database/`)
 
 Manages proxy data persistence and state across multiple deployment instances.
 
@@ -156,29 +156,30 @@ Manages proxy data persistence and state across multiple deployment instances.
   - `deprecated-proxies-dao.ts`: Failed proxy tracking
   - `cleanup.ts`: Automated maintenance tasks
 
-### 3️⃣ Cache Layer (`api/cache.ts`)
+### 3️⃣ Cache Layer (`src/cache/`)
 
 Provides response caching to reduce redundant requests and improve performance.
 
-- **Storage**: Redis or Vercel KV
+- **Storage**: In-memory cache (default) or Redis/Vercel KV
 - **TTL**: 5 minutes (configurable)
 - **Strategy**: Cache-aside pattern
 
-### 4️⃣ Proxy Manager
+### 4️⃣ Proxy Service (`src/core/proxy-service.ts`)
 
 Manages the lifecycle of proxy selection and usage.
 
-- **Strategy**: Fetches proxies from a curated list of free proxy providers.
-- **Validation**: Checks if a proxy is alive before using it (optimistic or pre-check).
-- **Rotation**: Selects multiple proxies for each request to maximize success rate.
+- **Strategy**: Fetches proxies from multiple free proxy providers
+- **Multi-Proxy Racing**: Selects 5 proxies per request and races them in parallel
+- **Fallback**: Automatically falls back to direct connection if all proxies fail
 
-### 5️⃣ Security Layer (`api/security.ts`)
+### 5️⃣ Security Layer (`src/security/`)
 
 Ensures secure operation and prevents abuse.
 
-- **SSRF Protection**: Blocks internal network access
+- **SSRF Protection**: Blocks internal network access and DNS rebinding attacks
 - **IP Validation**: Validates client IP addresses
 - **Header Sanitization**: Removes sensitive headers
+- **API Key Authentication**: Optional API Key validation for production
 
 ### 6️⃣ Fallback Mechanism
 
@@ -187,6 +188,26 @@ Ensures high success rates.
 - **Trigger**: Network timeout, connection refused, or HTTP 5xx from proxy.
 - **Action**: Retries the request directly from the Vercel Edge node.
 - **Transparency**: Returns metadata indicating if fallback was used.
+
+### 7️⃣ Middleware Layer (`src/middleware/`)
+
+Provides request processing pipeline.
+
+- **Components**:
+  - `rate-limit.ts`: Rate limiting (global and per-IP)
+  - `auth.ts`: Authentication
+  - `cors.ts`: CORS handling
+  - `api-key.ts`: API Key validation
+  - `body-parser.ts`: Request body parsing
+  - `compose.ts`: Middleware composition
+
+### 8️⃣ Webpage Capture (`src/webpage-capture/`)
+
+Provides webpage capture capabilities.
+
+- **Modes**: HTML, Screenshot, Article extraction
+- **Browser Pool**: Manages browser instances for rendering
+- **Article Extractor**: Extracts clean article content from webpages
 
 ---
 
