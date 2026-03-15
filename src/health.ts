@@ -24,7 +24,7 @@ export async function healthCheck(): Promise<Response> {
       status: "healthy",
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      version: "1.0.0",
+      version: "0.1.2",
       proxyPool: {
         availableCount: poolStatus.availableCount,
         mode: poolStatus.mode,
