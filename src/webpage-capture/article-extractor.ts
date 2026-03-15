@@ -101,7 +101,7 @@ export async function extractArticle(
     }
 
     const rawContent = result.content || '';
-    const rawTextContent = result.textContent || '';
+    const rawTextContent = (result as any).textContent || '';
 
     const cleanTextContent = rawTextContent
       ? stripHtmlTags(rawTextContent)
@@ -123,7 +123,7 @@ export async function extractArticle(
       content: rawContent || undefined,
       textContent: cleanTextContent || undefined,
       author: result.author || undefined,
-      publishedTime: result.publishedTime || undefined,
+      publishedTime: result.published || undefined,
       source: result.source || undefined,
       url: result.url || url,
       image: result.image || undefined,
@@ -170,7 +170,7 @@ export async function extractArticleFromUrl(url: string): Promise<ArticleResult>
     }
 
     const rawContent = result.content || '';
-    const rawTextContent = result.textContent || '';
+    const rawTextContent = (result as any).textContent || '';
 
     const cleanTextContent = rawTextContent
       ? stripHtmlTags(rawTextContent)
@@ -192,7 +192,7 @@ export async function extractArticleFromUrl(url: string): Promise<ArticleResult>
       content: rawContent || undefined,
       textContent: cleanTextContent || undefined,
       author: result.author || undefined,
-      publishedTime: result.publishedTime || undefined,
+      publishedTime: result.published || undefined,
       source: result.source || undefined,
       url: result.url || url,
       image: result.image || undefined,

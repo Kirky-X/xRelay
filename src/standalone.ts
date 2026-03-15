@@ -343,10 +343,10 @@ logger.info(`Starting xRelay server on ${HOST}:${PORT}`);
 const server = Bun.serve({
   port: PORT,
   hostname: HOST,
-  async fetch(request) {
+  async fetch(request: Request) {
     return handleRequest(request);
   },
-  error(error) {
+  error(error: Error) {
     logger.error(`Server error: ${error.message}`);
     return new Response(JSON.stringify({ error: "Internal Server Error" }), {
       status: 500,
