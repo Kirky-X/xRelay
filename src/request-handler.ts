@@ -17,6 +17,7 @@ import {
 } from "./proxy-manager.js";
 import { REQUEST_TIMEOUT_CONFIG, DATABASE_CONFIG, SECURITY_CONFIG } from "./config.js";
 import { request as undiciRequest, ProxyAgent } from "undici";
+import { getRandomUserAgent } from "./utils/user-agent.js";
 import { logger } from "./logger.js";
 
 // 响应体大小限制（使用配置值的 100 倍，因为响应体通常比请求体大）
@@ -202,6 +203,21 @@ export function filterDangerousHeaders(headers: Record<string, string>): Record<
 }
 
 /**
+ * 确保请求 headers 包含 User-Agent
+ * 若未传入则随机轮换，避免目标站识别为自动化客户端（Bun/Node 等）
+ * 大小写不敏感检查：HTTP header 名称大小写不敏感
+ */
+function ensureUserAgent(headers: Record<string, string>): Record<string, string> {
+  const hasUserAgent = Object.keys(headers).some(
+    (key) => key.toLowerCase() === 'user-agent',
+  );
+  if (!hasUserAgent) {
+    headers['User-Agent'] = getRandomUserAgent();
+  }
+  return headers;
+}
+
+/**
  * 读取响应体并限制大小（防止内存溢出）
  */
 async function readBodyWithLimit(body: BodyReadable, maxSize: number): Promise<string> {
@@ -275,6 +291,9 @@ async function sendRequestWithProxy(
 
     // 过滤危险 headers
     const filteredHeaders = request.headers ? filterDangerousHeaders(request.headers) : {};
+
+    // 确保有 User-Agent（防跟踪：避免暴露 Bun/Node 默认 UA）
+    ensureUserAgent(filteredHeaders);
 
     // 构建 undici 请求选项
     const undiciOptions = {
@@ -358,6 +377,9 @@ async function sendRequestDirect(request: ProxyRequest): Promise<{
 
     // 过滤危险 headers
     const filteredHeaders = request.headers ? filterDangerousHeaders(request.headers) : {};
+
+    // 确保有 User-Agent（防跟踪：避免暴露 Bun/Node 默认 UA）
+    ensureUserAgent(filteredHeaders);
 
     const fetchOptions: RequestInit = {
       method: request.method,
