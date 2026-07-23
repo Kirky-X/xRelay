@@ -3,19 +3,18 @@
  * License: MIT
  */
 
-import type { VercelRequest } from "@vercel/node";
-import type { Middleware, MiddlewareContext } from "./types.js";
-import { checkGlobalRateLimit, checkIpRateLimit } from "../rate-limiter.js";
-import { FEATURES } from "../config.js";
-
 /**
- * 限流配置
+ * Rate Limit - 请求限流
+ *
+ * 设计说明：
+ * - 单实例内存限流（基于 Map + 滑动窗口），适用于 Vercel Serverless 与 Bun 单实例场景
+ * - 跨实例分布式限流（基于 Vercel KV）原 `src/rate-limiter.ts` 已删除：
+ *   业务实际通过同步 `checkRateLimit` 处理，未使用 KV 异步限流。
+ * - IP 提取同时支持 VercelRequest（@vercel/node）与标准 Request（Bun/Edge Runtime）
  */
-export interface RateLimitConfig {
-  enabled: boolean;
-  enableGlobalLimit: boolean;
-  enableIpLimit: boolean;
-}
+
+import type { VercelRequest } from "@vercel/node";
+import { FEATURES } from "../config.js";
 
 /**
  * 限流检查结果
@@ -82,31 +81,7 @@ export function getClientIpFromRequest(request: Request): string {
   return "unknown";
 }
 
-/**
- * 检查限流（适配 Vercel API 入口）
- * @param clientIp 客户端 IP 地址
- * @returns 限流检查结果
- */
-export async function checkRateLimitForIp(
-  clientIp: string
-): Promise<RateLimitResult> {
-  if (!FEATURES.enableRateLimit) {
-    return {
-      allowed: true,
-      remaining: 100,
-      resetAt: Date.now() + 60000,
-    };
-  }
-
-  const result = await checkIpRateLimit(clientIp);
-  return {
-    allowed: result.allowed,
-    remaining: result.remaining,
-    resetAt: Date.now() + result.resetIn,
-  };
-}
-
-// 模块级限流存储
+// 模块级限流存储（按端点隔离）
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 const captureRateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
@@ -122,14 +97,19 @@ const MAX_STORE_SIZE = 10000; // 最大存储条目数
  */
 function cleanupRateLimitStore(): void {
   const now = Date.now();
-  
+
   // 删除过期条目
   for (const [key, record] of rateLimitStore.entries()) {
     if (now > record.resetAt) {
       rateLimitStore.delete(key);
     }
   }
-  
+  for (const [key, record] of captureRateLimitStore.entries()) {
+    if (now > record.resetAt) {
+      captureRateLimitStore.delete(key);
+    }
+  }
+
   // 如果超过最大数量，删除最旧的条目
   if (rateLimitStore.size > MAX_STORE_SIZE) {
     const entries = [...rateLimitStore.entries()]
@@ -137,6 +117,14 @@ function cleanupRateLimitStore(): void {
     const toDelete = entries.slice(0, rateLimitStore.size - MAX_STORE_SIZE);
     for (const [key] of toDelete) {
       rateLimitStore.delete(key);
+    }
+  }
+  if (captureRateLimitStore.size > MAX_STORE_SIZE) {
+    const entries = [...captureRateLimitStore.entries()]
+      .sort((a, b) => a[1].resetAt - b[1].resetAt);
+    const toDelete = entries.slice(0, captureRateLimitStore.size - MAX_STORE_SIZE);
+    for (const [key] of toDelete) {
+      captureRateLimitStore.delete(key);
     }
   }
 }
@@ -156,24 +144,28 @@ function isValidIpFormat(ip: string): boolean {
     const parts = ip.split('.').map(Number);
     return parts.every(part => part >= 0 && part <= 255);
   }
-  
+
   // IPv6 简单格式验证
   if (ip.includes(':')) {
     return ip.length >= 2 && ip.length <= 45;
   }
-  
+
   return false;
 }
 
 /**
- * 同步版本的限流检查（用于简单场景）
- * 注意：此函数返回一个 Promise 的占位结果，实际限流检查是异步的
+ * 同步限流检查
+ *
+ * 设计选择同步而非异步：业务路径（standalone.ts / api/index.ts）在请求处理前同步调用，
+ * 避免异步开销。内存存储足够单实例场景使用；如需跨实例限流，
+ * 应通过反向代理或外置限流服务（如 Vercel Edge Config）实现，而非应用层。
+ *
  * @param clientIp 客户端 IP 地址
  * @param endpoint 端点类型，可选 'default' | 'capture'
  * @returns 限流检查结果
  */
 export function checkRateLimit(clientIp: string, endpoint?: string): RateLimitResult {
-  // 限流未启用时直接放行（与 checkRateLimitForIp 行为一致）
+  // 限流未启用时直接放行
   if (!FEATURES.enableRateLimit) {
     return {
       allowed: true,
@@ -184,12 +176,13 @@ export function checkRateLimit(clientIp: string, endpoint?: string): RateLimitRe
 
   const now = Date.now();
   const store = endpoint === 'capture' ? captureRateLimitStore : rateLimitStore;
-  
+
   // 对 unknown IP 或无效 IP 实施更严格的限流（原限制的 1/10）
+  // 防止攻击者伪造 IP 头部绕过限流
   const isUnknownOrInvalid = clientIp === 'unknown' || !isValidIpFormat(clientIp);
   const baseLimit = endpoint === 'capture' ? CAPTURE_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
   const maxLimit = isUnknownOrInvalid ? Math.floor(baseLimit / 10) : baseLimit;
-  
+
   const record = store.get(clientIp);
 
   if (!record || now > record.resetAt) {
@@ -221,59 +214,5 @@ export function checkRateLimit(clientIp: string, endpoint?: string): RateLimitRe
     allowed: true,
     remaining: maxLimit - record.count,
     resetAt: record.resetAt,
-  };
-}
-
-/**
- * 创建限流中间件
- * 
- * 支持全局和 IP 级别的限流检查
- */
-export function rateLimitMiddleware(config: RateLimitConfig): Middleware {
-  return async (context: MiddlewareContext, next: () => Promise<void>) => {
-    if (!config.enabled) {
-      await next();
-      return;
-    }
-
-    // 全局限流检查
-    if (config.enableGlobalLimit) {
-      const globalLimit = await checkGlobalRateLimit();
-      if (!globalLimit.allowed) {
-        context.response = new Response(
-          JSON.stringify({
-            error: "Rate limit exceeded. Please try again later.",
-            code: "RATE_LIMIT_GLOBAL",
-            retryAfter: Math.ceil(globalLimit.resetIn / 1000),
-          }),
-          {
-            status: 429,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-        return;
-      }
-    }
-
-    // IP 级限流检查
-    if (config.enableIpLimit) {
-      const ipLimit = await checkIpRateLimit(context.clientIp);
-      if (!ipLimit.allowed) {
-        context.response = new Response(
-          JSON.stringify({
-            error: "Rate limit exceeded for your IP.",
-            code: "RATE_LIMIT_IP",
-            retryAfter: Math.ceil(ipLimit.resetIn / 1000),
-          }),
-          {
-            status: 429,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-        return;
-      }
-    }
-
-    await next();
   };
 }

@@ -48,11 +48,11 @@ export function validateApiKey(req: VercelRequest): void {
 }
 
 /**
- * 验证 API Key（标准 Request 版本，用于 Bun 等运行时）
- * @param request 标准 Request 对象
+ * 验证 API Key（标准 Headers 版本，用于跨运行时统一处理）
+ * @param headers 标准 Headers 对象
  * @throws AppError 如果 API Key 无效
  */
-export function validateApiKeyFromRequest(request: Request): void {
+export function validateApiKeyFromHeaders(headers: Headers): void {
   if (!API_KEY_CONFIG.enabled) {
     return;
   }
@@ -62,7 +62,7 @@ export function validateApiKeyFromRequest(request: Request): void {
     throw createInvalidApiKeyError();
   }
 
-  const providedKey = request.headers.get(API_KEY_CONFIG.headerName);
+  const providedKey = headers.get(API_KEY_CONFIG.headerName);
 
   if (!providedKey) {
     throw createInvalidApiKeyError();
@@ -78,6 +78,15 @@ export function validateApiKeyFromRequest(request: Request): void {
   if (!matched) {
     throw createInvalidApiKeyError();
   }
+}
+
+/**
+ * 验证 API Key（标准 Request 版本，用于 Bun 等运行时）
+ * @param request 标准 Request 对象
+ * @throws AppError 如果 API Key 无效
+ */
+export function validateApiKeyFromRequest(request: Request): void {
+  validateApiKeyFromHeaders(request.headers);
 }
 
 /**
