@@ -38,8 +38,3 @@ export type Middleware = (
   context: MiddlewareContext,
   next: () => Promise<void>
 ) => Promise<void>;
-
-/**
- * 中间件组合器
- */
-export type ComposedMiddleware = (context: MiddlewareContext) => Promise<void>;
