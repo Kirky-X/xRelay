@@ -136,15 +136,14 @@ export async function query(
   const start = Date.now();
 
   if (useVercelPostgres) {
-    // Vercel 环境：使用无服务器客户端
+    // Vercel 环境：每次查询创建临时客户端并正确管理生命周期
+    // （createClient 必须显式 connect/end，否则连接泄漏）
+    const client = createClient();
     try {
-      const client = createClient();
-
-      // 使用 query 方法（VercelClient 继承自 pg.Client）
+      await client.connect();
       const result = await client.query(text, params);
       const duration = Date.now() - start;
       logger.debug(`Query executed in ${duration}ms`, { module: 'Database' });
-
       return result;
     } catch (error) {
       logger.error(
@@ -153,6 +152,16 @@ export async function query(
         { module: 'Database' }
       );
       throw error;
+    } finally {
+      // 确保连接被释放，避免连接泄漏
+      try {
+        await client.end();
+      } catch (endError) {
+        logger.debug(
+          `Vercel Postgres client end failed: ${endError instanceof Error ? endError.message : 'Unknown error'}`,
+          { module: 'Database' }
+        );
+      }
     }
   } else {
     // 传统环境：使用连接池

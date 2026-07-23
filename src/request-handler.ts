@@ -8,7 +8,12 @@
  * 核心功能：代理请求 → 失败切换 → Fallback 直连
  */
 
-import type { ProxyInfo } from "./types/index.js";
+import type {
+  ProxyInfo,
+  ProxyRequest,
+  ProxyResponse,
+  RequestResult,
+} from "./types/index.js";
 import {
   getAvailableProxy,
   getMultipleProxies,
@@ -27,27 +32,6 @@ import { logger } from "./logger.js";
 // 响应体大小限制（使用配置值的 100 倍，因为响应体通常比请求体大）
 const MAX_RESPONSE_SIZE = SECURITY_CONFIG.maxRequestSize * 100;
 
-// 请求类型定义
-export interface ProxyRequest {
-  url: string;
-  method: string;
-  headers?: Record<string, string>;
-  body?: string;
-}
-
-export interface ProxyResponse {
-  success: boolean;
-  data?: string;
-  status?: number;
-  headers?: Record<string, string>;
-  // 代理相关信息
-  proxyUsed: boolean;
-  proxyIp: string | null;
-  proxySuccess: boolean;
-  fallbackUsed: boolean;
-  error?: string;
-}
-
 // HTTP 方法类型
 type HttpMethod =
   | "GET"
@@ -57,6 +41,64 @@ type HttpMethod =
   | "PATCH"
   | "HEAD"
   | "OPTIONS";
+
+/**
+ * ProxyAgent 池
+ *
+ * 每个 ProxyAgent 内部维护到同一代理的 HTTP 长连接池。
+ * 复用 ProxyAgent 可避免每次请求都重新建立 TCP/TLS 连接，
+ * 显著降低延迟与目标代理的连接开销。
+ *
+ * 容量限制：超过上限时淘汰最早加入的条目（FIFO），
+ * 避免因代理池规模扩大而无限增长内存。
+ */
+const proxyAgentPool = new Map<string, ProxyAgent>();
+const PROXY_AGENT_POOL_MAX_SIZE = 100;
+
+/**
+ * 获取或创建 ProxyAgent
+ * @param proxyUrl 代理 URL（如 http://1.2.3.4:8080）
+ * @returns 复用的 ProxyAgent 实例
+ */
+function getProxyAgent(proxyUrl: string): ProxyAgent {
+  const existing = proxyAgentPool.get(proxyUrl);
+  if (existing) {
+    return existing;
+  }
+
+  const agent = new ProxyAgent(proxyUrl);
+  proxyAgentPool.set(proxyUrl, agent);
+
+  // FIFO 淘汰：超过容量时关闭并删除最早加入的条目
+  if (proxyAgentPool.size > PROXY_AGENT_POOL_MAX_SIZE) {
+    const oldestKey = proxyAgentPool.keys().next().value;
+    if (oldestKey !== undefined) {
+      const oldestAgent = proxyAgentPool.get(oldestKey);
+      try {
+        oldestAgent?.close();
+      } catch {
+        // 忽略关闭错误
+      }
+      proxyAgentPool.delete(oldestKey);
+    }
+  }
+
+  return agent;
+}
+
+/**
+ * 关闭所有 ProxyAgent 并清空池（用于优雅关闭与测试）
+ */
+export function closeAllProxyAgents(): void {
+  for (const agent of proxyAgentPool.values()) {
+    try {
+      agent.close();
+    } catch {
+      // 忽略关闭错误
+    }
+  }
+  proxyAgentPool.clear();
+}
 
 // Undici 响应 headers 类型（来自 http.IncomingHttpHeaders）
 interface UndiciHeaders extends Record<string, string | string[] | undefined> {
@@ -228,18 +270,14 @@ async function sendRequestWithProxy(
   request: ProxyRequest,
   proxy: ProxyInfo,
   externalSignal?: AbortSignal,
-): Promise<{
-  success: boolean;
-  data?: string;
-  status?: number;
-  headers?: Record<string, string>;
-  error?: string;
-}> {
+): Promise<RequestResult> {
   logger.debug(`使用代理: ${proxy.ip}:***`, { module: "RequestHandler" });
 
-  // 使用 undici 的 request 方法直接发送请求
+  // 使用池化的 ProxyAgent：复用 TCP/TLS 长连接，避免每次请求重建连接
   const proxyUrl = `http://${proxy.ip}:${proxy.port}`;
-  const dispatcher = new ProxyAgent(proxyUrl);
+  const dispatcher = getProxyAgent(proxyUrl);
+  // ProxyRequest.method 可选：未指定时按 GET 处理
+  const method = (request.method ?? "GET").toUpperCase() as HttpMethod;
 
   try {
     // 创建 AbortController 用于超时控制
@@ -280,7 +318,7 @@ async function sendRequestWithProxy(
 
     // 构建 undici 请求选项
     const undiciOptions = {
-      method: request.method.toUpperCase() as HttpMethod,
+      method,
       headers: filteredHeaders as Record<string, string>,
       dispatcher,
       signal: combinedController.signal,
@@ -336,27 +374,18 @@ async function sendRequestWithProxy(
       success: false,
       error: errorMessage,
     };
-  } finally {
-    // 确保 ProxyAgent 被关闭，防止资源泄漏
-    try {
-      dispatcher.close();
-    } catch {
-      // 忽略关闭错误
-    }
   }
+  // 不在此处关闭 dispatcher：ProxyAgent 由池统一管理生命周期
+  // 池会通过 FIFO 淘汰或 closeAllProxyAgents() 关闭
 }
 
 /**
  * 直接发送请求（不使用代理）
  */
-async function sendRequestDirect(request: ProxyRequest): Promise<{
-  success: boolean;
-  data?: string;
-  status?: number;
-  headers?: Record<string, string>;
-  error?: string;
-}> {
+async function sendRequestDirect(request: ProxyRequest): Promise<RequestResult> {
   logger.debug(`使用直连模式`, { module: "RequestHandler" });
+  // ProxyRequest.method 可选：未指定时按 GET 处理
+  const method = request.method ?? "GET";
 
   try {
     const controller = new AbortController();
@@ -374,12 +403,12 @@ async function sendRequestDirect(request: ProxyRequest): Promise<{
     ensureUserAgent(filteredHeaders);
 
     const fetchOptions: RequestInit = {
-      method: request.method,
+      method,
       headers: filteredHeaders,
       signal: controller.signal,
     };
 
-    if (request.body && ["POST", "PUT", "PATCH"].includes(request.method)) {
+    if (request.body && ["POST", "PUT", "PATCH"].includes(method)) {
       fetchOptions.body = request.body;
     }
 
@@ -493,7 +522,7 @@ export async function sendProxyRequest(
   const useFallback = options.useFallback !== false;
 
   const urlObj = new URL(request.url);
-  logger.info(`开始处理请求: ${request.method} ${urlObj.hostname}`, {
+  logger.info(`开始处理请求: ${request.method ?? "GET"} ${urlObj.hostname}`, {
     module: "RequestHandler",
   });
   logger.debug(
@@ -636,7 +665,7 @@ async function handleNoProxies(
  * @returns 响应对象
  */
 function buildSuccessResponse(
-  result: { data?: string; status?: number; headers?: Record<string, string> },
+  result: RequestResult,
   proxy: ProxyInfo,
 ): ProxyResponse {
   logger.info(`代理请求成功: ${proxy.ip}:***`, { module: "RequestHandler" });

@@ -37,34 +37,6 @@ interface CachedProxyResponse extends ProxyResponse {
 }
 
 /**
- * 将 request-handler 的响应转换为标准 ProxyResponse
- */
-function normalizeResponse(response: {
-  success: boolean;
-  data?: string;
-  status?: number;
-  headers?: Record<string, string>;
-  proxyUsed: boolean;
-  proxyIp?: string | null;
-  proxySuccess?: boolean;
-  fallbackUsed: boolean;
-  error?: string;
-}): ProxyResponse {
-  return {
-    success: response.success,
-    status: response.status ?? 0,
-    statusText: response.success ? "OK" : (response.error ?? "Error"),
-    headers: response.headers ?? {},
-    body: response.data ?? "",
-    proxyUsed: response.proxyUsed,
-    fallbackUsed: response.fallbackUsed,
-    proxyIp: response.proxyIp,
-    proxySuccess: response.proxySuccess,
-    error: response.error,
-  };
-}
-
-/**
  * 代理服务类
  * 提供统一的代理请求接口
  */
@@ -80,7 +52,7 @@ export class ProxyService {
       proxyCount: DATABASE_CONFIG.proxiesPerRequest,
       ...config,
     };
-    
+
     // 初始化缓存
     this.cache = new AdvancedCache<CachedProxyResponse>(
       CACHE_CONFIG.maxSize,
@@ -105,7 +77,7 @@ export class ProxyService {
 
     // 生成缓存键（仅对 GET 请求缓存）
     const cacheKey = this.generateCacheKey(normalizedRequest);
-    
+
     // 检查缓存（仅 GET 请求）
     if (mergedConfig.useCache && normalizedRequest.method === "GET") {
       const cached = this.cache.get(cacheKey);
@@ -126,7 +98,7 @@ export class ProxyService {
       const response = await sendRequestWithMultipleProxies(
         {
           url: normalizedRequest.url,
-          method: normalizedRequest.method || "GET",
+          method: normalizedRequest.method as ProxyRequest["method"],
           headers: normalizedRequest.headers,
           body: normalizedRequest.body,
         },
@@ -136,19 +108,17 @@ export class ProxyService {
 
       // 记录响应日志
       logger.info(
-        `代理请求完成: 状态=${response.status}, 代理=${response.proxyUsed}, 回退=${response.fallbackUsed}`,
+        `代理请求完成: 状态=${response.status ?? "N/A"}, 代理=${response.proxyUsed}, 回退=${response.fallbackUsed ?? false}`,
         { module: 'ProxyService' }
       );
 
-      const normalizedResponse = normalizeResponse(response);
-      
       // 缓存成功的 GET 请求响应
       if (mergedConfig.useCache && normalizedRequest.method === "GET" && response.success) {
-        this.cache.set(cacheKey, normalizedResponse, CACHE_CONFIG.ttl);
+        this.cache.set(cacheKey, response, CACHE_CONFIG.ttl);
         logger.debug(`已缓存响应: ${this.maskUrl(normalizedRequest.url)}`, { module: 'ProxyService' });
       }
 
-      return normalizedResponse;
+      return response;
     } catch (error) {
       logger.error(
         `代理请求失败: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -187,7 +157,7 @@ export class ProxyService {
       const response = await sendProxyRequest(
         {
           url: normalizedRequest.url,
-          method: normalizedRequest.method || "GET",
+          method: normalizedRequest.method as ProxyRequest["method"],
           headers: normalizedRequest.headers,
           body: normalizedRequest.body,
         },
@@ -197,7 +167,7 @@ export class ProxyService {
         }
       );
 
-      return normalizeResponse(response);
+      return response;
     } catch (error) {
       logger.error(
         `顺序代理请求失败: ${error instanceof Error ? error.message : "Unknown error"}`,

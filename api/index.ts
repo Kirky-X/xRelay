@@ -4,346 +4,97 @@
  */
 
 /**
- * API 入口层 - 薄入口层设计
- * 仅负责请求解析、响应格式化和错误处理
- * 业务逻辑委托给核心模块处理
+ * API 入口层 - Vercel IO 适配器
+ *
+ * 职责：将 VercelRequest/VercelResponse 适配到共享核心处理器 dispatchRequest。
+ * 业务逻辑统一位于 src/server/handlers.ts，本文件只做运行时 IO 适配。
  */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { ProxyService } from "../src/core/proxy-service.js";
-import { validateApiKey } from "../src/middleware/auth.js";
-import { checkRateLimit, getClientIp } from "../src/middleware/rate-limit.js";
-import { validateUrl, validateDnsResolution } from "../src/security.js";
-import { AppError, ErrorCode } from "../src/errors/index.js";
-import { CORS_CONFIG, isProduction, validateProductionConfig } from "../src/config.js";
+import {
+  dispatchRequest,
+  type RequestContext,
+} from "../src/server/handlers.js";
+import { getClientIp } from "../src/middleware/rate-limit.js";
 import { generateRequestId } from "../src/utils/crypto.js";
 import { logger } from "../src/logger.js";
-import type { ProxyRequest } from "../src/types/index.js";
-import { captureWebpage } from "../src/webpage-capture/index.js";
-import type { CaptureRequest } from "../src/webpage-capture/types.js";
-
-// 创建代理服务实例（单例）
-const proxyService = new ProxyService();
-
-// 生产环境启动时验证配置
-if (isProduction()) {
-  const configResult = validateProductionConfig();
-  if (!configResult.valid) {
-    console.error("[Security] Configuration errors:", configResult.errors);
-    // 在 Vercel 环境中记录警告，但不阻止启动
-    // 实际生产中应该通过 CI/CD 检查
-  }
-}
 
 /**
- * 发送错误响应
+ * 从 VercelRequest 构造运行时中立的 RequestContext
  */
-function sendError(res: VercelResponse, error: AppError, requestId?: string): void {
-  res.status(error.statusCode).json(error.toJSON(requestId));
-}
-
-/**
- * 网页捕获处理函数
- */
-async function handleCapture(
-  req: VercelRequest,
-  res: VercelResponse,
-  requestId: string,
-  startTime: number
-): Promise<void> {
-  try {
-    const clientIp = getClientIp(req);
-    const rateLimit = checkRateLimit(clientIp, "capture");
-
-    res.setHeader("X-RateLimit-Limit", "30");
-    res.setHeader("X-RateLimit-Remaining", rateLimit.remaining.toString());
-    res.setHeader("X-RateLimit-Reset", rateLimit.resetAt.toString());
-
-    if (!rateLimit.allowed) {
-      sendError(
-        res,
-        new AppError(ErrorCode.RATE_LIMITED, "Rate limit exceeded for capture endpoint", 429),
-        requestId
-      );
-      return;
-    }
-
-    validateApiKey(req);
-
-    const { url, options }: CaptureRequest = req.body || {};
-
-    if (!url) {
-      sendError(
-        res,
-        new AppError(ErrorCode.INVALID_URL, "URL is required", 400),
-        requestId
-      );
-      return;
-    }
-
-    const urlValidation = validateUrl(url);
-    if (!urlValidation.valid) {
-      sendError(
-        res,
-        new AppError(ErrorCode.INVALID_URL, urlValidation.error || "Invalid URL", 400),
-        requestId
-      );
-      return;
-    }
-
-    try {
-      const parsedUrl = new URL(url);
-      const dnsResult = await validateDnsResolution(parsedUrl.hostname);
-      if (!dnsResult.valid) {
-        sendError(
-          res,
-          new AppError(ErrorCode.INVALID_URL, dnsResult.error || "DNS validation failed", 400),
-          requestId
-        );
-        return;
-      }
-    } catch (dnsError) {
-      // DNS 验证失败（包括网络错误）：fail-closed，拒绝请求
-      // 防止攻击者通过触发 DNS 错误绕过 SSRF 防护
-      logger.error(
-        `[Security] DNS validation error for ${typeof url === 'string' ? url : 'invalid-url'}`,
-        dnsError instanceof Error ? dnsError : undefined,
-        { module: 'Capture' }
-      );
-      sendError(
-        res,
-        new AppError(ErrorCode.INVALID_URL, "DNS validation failed", 400),
-        requestId
-      );
-      return;
-    }
-
-    const result = await captureWebpage(url, options);
-
-    res.setHeader("X-Request-Id", requestId);
-
-    if (result.success) {
-      res.status(200).json({
-        success: true,
-        data: {
-          html: result.html,
-          title: result.title,
-          url: result.url,
-          mode: result.mode,
-          degraded: result.degraded,
-          resources: result.resources,
-          capturedAt: result.capturedAt,
-          duration: result.duration,
-        },
-        requestId,
-        duration: Date.now() - startTime,
-      });
-    } else {
-      sendError(
-        res,
-        new AppError(ErrorCode.INTERNAL_ERROR, result.error || "Capture failed", 500),
-        requestId
-      );
-    }
-  } catch (error) {
-    if (error instanceof AppError) {
-      sendError(res, error, requestId);
-    } else {
-      const errorMessage = isProduction()
-        ? "Internal server error"
-        : (error instanceof Error ? error.message : "Unknown error");
-
-      const appError = new AppError(
-        ErrorCode.INTERNAL_ERROR,
-        errorMessage,
-        500
-      );
-      sendError(res, appError, requestId);
-    }
-  }
-}
-
-/**
- * 设置安全响应头
- */
-function setSecurityHeaders(res: VercelResponse): void {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-  res.setHeader("X-XSS-Protection", "1; mode=block");
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
-}
-
-/**
- * 设置 CORS 响应头（动态白名单）
- *
- * 安全策略：使用显式白名单，不使用通配符 "*"。
- * 即使在开发模式下，也仅允许配置的本地开发端口，
- * 避免任意源在共享开发环境中调用受 API Key 保护的端点。
- */
-function setCorsHeaders(res: VercelResponse, origin?: string): void {
-  const allowedOrigins = CORS_CONFIG.allowedOrigins;
-
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    // 允许浏览器在跨域请求中携带凭证（如 Cookie、API Key）
-    res.setHeader("Vary", "Origin");
-  }
-  // 不匹配白名单时不设置 Access-Control-Allow-Origin，浏览器会拒绝跨域请求
-
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
-  res.setHeader("Access-Control-Max-Age", "86400");
-}
-
-/**
- * 主处理函数
- */
-export default async function handler(
-  req: VercelRequest,
-  res: VercelResponse
-): Promise<void> {
+function buildContext(req: VercelRequest): RequestContext {
   const requestId = generateRequestId();
   const startTime = Date.now();
 
-  // 设置响应头
-  setSecurityHeaders(res);
-  const origin = req.headers.origin as string | undefined;
-  setCorsHeaders(res, origin);
+  // 路径解析：去掉 query string
+  const url = req.url ?? "";
+  const path = url.split("?")[0] || "";
 
-  // 处理 OPTIONS 预检请求
-  if (req.method === "OPTIONS") {
-    res.status(204).end();
-    return;
-  }
-
-  const path = req.url?.split("?")[0] || "";
-
-  // 健康检查端点
-  if (req.method === "GET" && (path === "/api/health" || path === "/api/ready" || path === "/api")) {
-    res.status(200).json({
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      version: "0.1.2",
-      uptime: Math.floor(process.uptime?.() ?? 0),
-      requestId,
-    });
-    return;
-  }
-
-  // 网页捕获端点
-  if (req.method === "POST" && path === "/api/capture") {
-    await handleCapture(req, res, requestId, startTime);
-    return;
-  }
-
-  // 仅允许 POST /api 用于代理请求
-  if (req.method !== "POST" || path !== "/api") {
-    sendError(
-      res,
-      new AppError(ErrorCode.METHOD_NOT_ALLOWED, "Method not allowed", 405),
-      requestId
-    );
-    return;
-  }
-
-  try {
-    // 限流检查
-    const clientIp = getClientIp(req);
-    const rateLimit = checkRateLimit(clientIp);
-
-    // 设置限流响应头
-    res.setHeader("X-RateLimit-Limit", "100");
-    res.setHeader("X-RateLimit-Remaining", rateLimit.remaining.toString());
-    res.setHeader("X-RateLimit-Reset", rateLimit.resetAt.toString());
-
-    if (!rateLimit.allowed) {
-      sendError(
-        res,
-        new AppError(ErrorCode.RATE_LIMITED, "Rate limit exceeded", 429),
-        requestId
-      );
-      return;
-    }
-
-    // API Key 验证
-    validateApiKey(req);
-
-    // 解析请求体
-    const { url, method = "GET", headers = {}, body, timeout }: ProxyRequest =
-      req.body || {};
-
-    // URL 验证（静态检查）
-    const urlValidation = validateUrl(url);
-    if (!urlValidation.valid) {
-      sendError(
-        res,
-        new AppError(ErrorCode.INVALID_URL, urlValidation.error || "Invalid URL", 400),
-        requestId
-      );
-      return;
-    }
-
-    // DNS 重绑定防护（动态检查）
-    try {
-      const parsedUrl = new URL(url);
-      const dnsResult = await validateDnsResolution(parsedUrl.hostname);
-      if (!dnsResult.valid) {
-        sendError(
-          res,
-          new AppError(ErrorCode.INVALID_URL, dnsResult.error || "DNS validation failed", 400),
-          requestId
-        );
-        return;
-      }
-    } catch (dnsError) {
-      // DNS 验证异常：fail-closed，防止攻击者通过触发 DNS 错误绕过 SSRF 防护
-      logger.error(
-        `[Security] DNS validation error for ${typeof url === 'string' ? url : 'invalid-url'}`,
-        dnsError instanceof Error ? dnsError : undefined,
-        { module: 'Proxy' }
-      );
-      sendError(
-        res,
-        new AppError(ErrorCode.INVALID_URL, "DNS validation failed", 400),
-        requestId
-      );
-      return;
-    }
-
-    // 执行代理请求
-    const response = await proxyService.execute({
-      url,
-      method,
-      headers,
-      body,
-      timeout,
-    });
-
-    // 设置请求 ID 响应头
-    res.setHeader("X-Request-Id", requestId);
-
-    // 发送成功响应
-    res.status(200).json({
-      ...response,
-      requestId,
-      duration: Date.now() - startTime,
-    });
-  } catch (error) {
-    if (error instanceof AppError) {
-      sendError(res, error, requestId);
+  // headers 统一转换为 Headers 对象（Vercel 的 headers 是普通对象）
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers ?? {})) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const v of value) headers.append(key, v);
     } else {
-      const errorMessage = isProduction()
-        ? "Internal server error"
-        : (error instanceof Error ? error.message : "Unknown error");
+      headers.set(key, value);
+    }
+  }
 
-      const appError = new AppError(
-        ErrorCode.INTERNAL_ERROR,
-        errorMessage,
-        500
-      );
-      sendError(res, appError, requestId);
+  // 客户端 IP（Vercel 提供 req.ip，回退到 x-forwarded-for / x-real-ip）
+  const clientIp = getClientIp(req);
+
+  return {
+    method: req.method ?? "GET",
+    path,
+    headers,
+    body: req.body,
+    clientIp,
+    requestId,
+    startTime,
+  };
+}
+
+/**
+ * 将 ResponseSpec 应用到 VercelResponse
+ */
+function applyResponse(spec: Awaited<ReturnType<typeof dispatchRequest>>, res: VercelResponse): void {
+  for (const [name, value] of Object.entries(spec.headers)) {
+    res.setHeader(name, value);
+  }
+  res.status(spec.status);
+  if (spec.body === null || spec.body === undefined) {
+    res.end();
+  } else {
+    res.json(spec.body);
+  }
+}
+
+/**
+ * Vercel 入口处理函数
+ */
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse,
+): Promise<void> {
+  try {
+    const ctx = buildContext(req);
+    const spec = await dispatchRequest(ctx);
+    applyResponse(spec, res);
+  } catch (error) {
+    // 兜底：dispatchRequest 内部应已捕获所有错误并返回 ResponseSpec
+    // 此处仅处理未预期的 IO 适配错误
+    logger.error(
+      `Unhandled error in Vercel handler: ${error instanceof Error ? error.message : "Unknown error"}`,
+      error instanceof Error ? error : undefined,
+      { module: "VercelHandler" },
+    );
+
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Internal Server Error",
+        code: "INTERNAL_ERROR",
+      });
     }
   }
 }

@@ -30,18 +30,27 @@ export interface ProxyRequest {
   timeout?: number;
 }
 
+/**
+ * 代理响应接口
+ *
+ * 字段统一原则：
+ * - `success`/`proxyUsed` 为必填，决定请求与代理的整体结果
+ * - 其余字段可选，避免强制下游构造空对象
+ * - `data` 与 `body` 同时保留：`data` 为 request-handler 路径的原始响应体，
+ *   `body` 为 proxy-service 标准化后的等价表达，二者择一即可
+ */
 export interface ProxyResponse {
   success: boolean;
-  status: number;
-  statusText: string;
-  headers: Record<string, string>;
-  body: string;
+  status?: number;
+  statusText?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  data?: string;
   proxyUsed: boolean;
   fallbackUsed?: boolean;
   proxyIp?: string | null;
   proxySuccess?: boolean;
   error?: string;
-  data?: string;
   cached?: boolean;
 }
 
