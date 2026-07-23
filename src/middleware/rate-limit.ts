@@ -173,6 +173,15 @@ function isValidIpFormat(ip: string): boolean {
  * @returns 限流检查结果
  */
 export function checkRateLimit(clientIp: string, endpoint?: string): RateLimitResult {
+  // 限流未启用时直接放行（与 checkRateLimitForIp 行为一致）
+  if (!FEATURES.enableRateLimit) {
+    return {
+      allowed: true,
+      remaining: 100,
+      resetAt: Date.now() + RATE_LIMIT_WINDOW,
+    };
+  }
+
   const now = Date.now();
   const store = endpoint === 'capture' ? captureRateLimitStore : rateLimitStore;
   
