@@ -294,9 +294,7 @@ xRelay/
 │   │   │   ├── database-mode.ts
 │   │   │   ├── circuit-breaker.ts
 │   │   │   └── types.ts
-│   │   ├── proxy-service.ts  # 代理服务
-│   │   ├── proxy-strategy.ts # 代理策略
-│   │   └── container.ts      # 依赖注入容器
+│   │   └── proxy-service.ts  # 代理服务
 │   ├── middleware/          # 中间件
 │   │   ├── rate-limit.ts     # 限流
 │   │   ├── auth.ts           # 认证

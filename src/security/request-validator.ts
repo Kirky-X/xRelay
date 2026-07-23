@@ -10,13 +10,14 @@
 
 import { AppError, ErrorCode } from '../errors/index.js';
 import { SECURITY_CONFIG } from '../config.js';
+import { logger } from '../logger.js';
 import type { ProxyRequest } from '../types/index.js';
 
 const MAX_URL_LENGTH = 2048;
 
 export function validateRequest(data: unknown): ProxyRequest {
   if (!data || typeof data !== 'object') {
-    throw new AppError(ErrorCode.INTERNAL_ERROR, 'Invalid request body', 400);
+    throw new AppError(ErrorCode.INVALID_REQUEST, 'Invalid request body', 400);
   }
 
   const request = data as Record<string, unknown>;
@@ -36,7 +37,7 @@ export function validateRequest(data: unknown): ProxyRequest {
   const method = (request.method as string) || 'GET';
 
   if (!validMethods.includes(method.toUpperCase())) {
-    throw new AppError(ErrorCode.INTERNAL_ERROR, 'Invalid HTTP method', 400);
+    throw new AppError(ErrorCode.INVALID_REQUEST, 'Invalid HTTP method', 400);
   }
 
   // Validate body size (use config value)
@@ -51,8 +52,9 @@ export function validateRequest(data: unknown): ProxyRequest {
   if (request.headers && typeof request.headers === 'object') {
     for (const [key, value] of Object.entries(request.headers as Record<string, unknown>)) {
       if (typeof value === 'string') {
-        // Check for header injection
+        // Check for header injection (CRLF)
         if (key.includes('\r') || key.includes('\n') || value.includes('\r') || value.includes('\n')) {
+          logger.warn('Header filtered for CRLF injection', { key, module: 'RequestValidator' });
           continue;
         }
         headers[key] = value;

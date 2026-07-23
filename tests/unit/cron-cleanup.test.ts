@@ -9,7 +9,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Request as NodeRequest } from "undici";
 
 // Mock runCleanup，避免依赖真实数据库
 const runCleanupMock = vi.fn();

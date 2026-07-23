@@ -15,5 +15,16 @@ export default defineConfig({
     globals: true,
     root: ".",
     setupFiles: ["tests/setup.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      reportsDirectory: "./coverage",
+      thresholds: {
+        statements: 50,
+        branches: 40,
+        functions: 45,
+        lines: 50,
+      },
+    },
   },
 });

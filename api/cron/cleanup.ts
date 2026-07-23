@@ -8,19 +8,30 @@
  * 由 Vercel Cron Jobs 定期调用，清理过期的废弃代理
  *
  * 鉴权策略（优先级递减）：
- *   1. 配置了 CRON_SECRET：必须 Authorization: Bearer <CRON_SECRET>
- *   2. 未配置 CRON_SECRET：仅允许 Vercel 内部触发（x-vercel-cron: true）
+ *   1. 配置了 CRON_SECRET：必须 Authorization: Bearer <CRON_SECRET>（常量时间比较）
+ *   2. 未配置 CRON_SECRET：
+ *      - 生产环境：拒绝（防止未授权触发）
+ *      - 非生产环境：仅允许 Vercel Cron 内部触发（x-vercel-cron: true）
  *
  * 安全考虑：
  * - 拒绝除 POST/GET 外的方法，防止被滥用为通用 webhook
  * - GET 方法仅用于人工触发调试，生产仍由 Vercel Cron POST 调用
+ * - 使用常量时间比较 Bearer token，防止时序攻击
  */
 
 import { runCleanup } from "../../src/database/cleanup.js";
+import { timingSafeEqualString } from "../../src/utils/crypto.js";
 
 export const config = {
   runtime: "nodejs",
 };
+
+/**
+ * 是否为生产环境
+ */
+function isProduction(): boolean {
+  return process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
+}
 
 /**
  * 验证 Cron 请求授权
@@ -28,13 +39,22 @@ export const config = {
 function validateCronAuth(request: Request): boolean {
   const cronSecret = process.env.CRON_SECRET;
 
-  // 配置了 CRON_SECRET：必须匹配 Bearer token
+  // 配置了 CRON_SECRET：必须匹配 Bearer token（常量时间比较）
   if (cronSecret) {
     const authHeader = request.headers.get("authorization");
-    return authHeader === `Bearer ${cronSecret}`;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return false;
+    }
+    const providedToken = authHeader.slice(7); // 移除 "Bearer " 前缀
+    return timingSafeEqualString(providedToken, cronSecret);
   }
 
-  // 未配置 CRON_SECRET：仅信任 Vercel Cron 内部标识
+  // 未配置 CRON_SECRET：生产环境拒绝（防止未授权触发清理任务）
+  if (isProduction()) {
+    return false;
+  }
+
+  // 非生产环境：仅信任 Vercel Cron 内部标识
   return request.headers.get("x-vercel-cron") === "true";
 }
 

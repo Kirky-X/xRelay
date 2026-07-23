@@ -5,24 +5,21 @@
 import type { ProxyInfo } from "../../types/index.js";
 import type { PoolStatus } from "./types.js";
 import {
-  upsertProxy,
-  getAllProxies,
   getProxyCount,
   incrementFailureCount,
   incrementSuccessCount,
   deleteProxy,
   batchInsertProxies,
   getWeightedProxies,
-  type AvailableProxy,
 } from "../../database/available-proxies-dao.js";
 import {
   insertDeprecatedProxy,
   getAllDeprecatedProxies,
 } from "../../database/deprecated-proxies-dao.js";
 import { fetchAllProxies } from "../../proxy-fetcher.js";
-import { PROXY_CONFIG, DATABASE_CONFIG } from "../../config.js";
+import { DATABASE_CONFIG } from "../../config.js";
 import { logger } from "../../logger.js";
-import { isCircuitOpen, recordFailure, recordSuccess } from "./circuit-breaker.js";
+import { isCircuitOpen } from "./circuit-breaker.js";
 
 /**
  * 从数据库加载代理

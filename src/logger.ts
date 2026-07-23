@@ -105,18 +105,16 @@ class Logger {
     });
   }
 
-  // Sanitize URL for logging (remove sensitive query params)
+  // Sanitize URL for logging (redact all query parameters by default)
+  // 安全策略：默认遮蔽全部查询参数，避免 token/key/签名等敏感信息进入日志
+  // 仅保留 host + pathname，query 以 [REDACTED] 占位
   private sanitizeUrl(url: string): string {
     try {
       const parsed = new URL(url);
-      // Remove sensitive query parameters
-      const sensitiveParams = ['token', 'key', 'secret', 'password', 'api_key'];
-      for (const param of sensitiveParams) {
-        if (parsed.searchParams.has(param)) {
-          parsed.searchParams.set(param, '[REDACTED]');
-        }
+      if (parsed.search) {
+        return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}?[REDACTED]`;
       }
-      return parsed.toString();
+      return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
     } catch {
       return url;
     }

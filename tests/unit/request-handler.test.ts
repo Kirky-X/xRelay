@@ -14,7 +14,7 @@ import {
   sendProxyRequest,
   sendRequestWithMultipleProxies,
 } from '../../src/request-handler.js';
-import type { ProxyRequest, ProxyResponse } from '../../src/request-handler.js';
+import type { ProxyRequest } from '../../src/request-handler.js';
 import * as proxyManager from '../../src/proxy-manager.js';
 
 // Mock proxy-manager 模块

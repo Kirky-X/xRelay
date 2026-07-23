@@ -33,11 +33,13 @@ function isContainerEnvironment(): boolean {
 
   // 检查 /.dockerenv 文件存在性（同步检查，仅在 Node.js 环境可用）
   try {
-    require('fs').existsSync('/.dockerenv');
-    return true;
+    if (require('fs').existsSync('/.dockerenv')) {
+      return true;
+    }
   } catch {
-    return false;
+    // 非 Node.js 环境或 fs 不可用，跳过
   }
+  return false;
 }
 
 /**
@@ -116,7 +118,7 @@ export const POOL_CONFIG: BrowserPoolConfig = {
  * 默认捕获选项
  * 注意：userAgent 默认使用随机轮换（反检测），如需固定 UA 由调用方显式传入
  */
-export const DEFAULT_CAPTURE_OPTIONS: Omit<Required<CaptureOptions>, 'maxImageSize' | 'compressImages'> & { maxImageSize: number } = {
+export const DEFAULT_CAPTURE_OPTIONS: Omit<Required<CaptureOptions>, 'maxImageSize'> & { maxImageSize: number } = {
   mode: 'html',
   extractArticle: false,
   waitTime: 0,

@@ -25,6 +25,8 @@ export class MemoryCache<T = unknown> implements CacheProvider<T> {
       return null;
     }
 
+    // 更新最后访问时间，实现真正的 LRU（而非 FIFO）
+    entry.timestamp = Date.now();
     this.hits++;
     return entry.value;
   }

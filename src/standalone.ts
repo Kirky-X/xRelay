@@ -41,14 +41,21 @@ function setSecurityHeaders(headers: Headers): void {
   headers.set("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
 }
 
+/**
+ * 设置 CORS 响应头（动态白名单）
+ *
+ * 安全策略：使用显式白名单，不使用通配符 "*"。
+ * 即使在开发模式下，也仅允许配置的本地开发端口，
+ * 避免任意源在共享开发环境中调用受 API Key 保护的端点。
+ */
 function setCorsHeaders(headers: Headers, origin?: string): void {
   const allowedOrigins = CORS_CONFIG.allowedOrigins;
 
   if (origin && allowedOrigins.includes(origin)) {
     headers.set("Access-Control-Allow-Origin", origin);
-  } else if (!isProduction()) {
-    headers.set("Access-Control-Allow-Origin", "*");
+    headers.set("Vary", "Origin");
   }
+  // 不匹配白名单时不设置 Access-Control-Allow-Origin
 
   headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "Content-Type, x-api-key");
@@ -131,10 +138,31 @@ async function handleCapture(
       const parsedUrl = new URL(url);
       const dnsResult = await validateDnsResolution(parsedUrl.hostname);
       if (!dnsResult.valid) {
-        logger.warn(`DNS validation failed for ${url}: ${dnsResult.error}`);
+        // DNS 验证失败：fail-closed，拒绝请求
+        headers.set("Content-Type", "application/json");
+        return new Response(
+          JSON.stringify(jsonError(
+            new AppError(ErrorCode.INVALID_URL, dnsResult.error || "DNS validation failed", 400),
+            requestId
+          )),
+          { status: 400, headers }
+        );
       }
     } catch (dnsError) {
-      logger.warn(`DNS validation error for ${url}: ${dnsError}`);
+      // DNS 验证异常：fail-closed，防止攻击者通过触发 DNS 错误绕过 SSRF 防护
+      logger.error(
+        `DNS validation error for ${typeof url === 'string' ? url : 'invalid-url'}`,
+        dnsError instanceof Error ? dnsError : undefined,
+        { module: 'Capture' }
+      );
+      headers.set("Content-Type", "application/json");
+      return new Response(
+        JSON.stringify(jsonError(
+          new AppError(ErrorCode.INVALID_URL, "DNS validation failed", 400),
+          requestId
+        )),
+        { status: 400, headers }
+      );
     }
 
     const result = await captureWebpage(url, options);
@@ -291,10 +319,31 @@ async function handleRequest(request: Request): Promise<Response> {
       const parsedUrl = new URL(targetUrl);
       const dnsResult = await validateDnsResolution(parsedUrl.hostname);
       if (!dnsResult.valid) {
-        logger.warn(`DNS validation failed for ${targetUrl}: ${dnsResult.error}`);
+        // DNS 验证失败：fail-closed，拒绝请求
+        headers.set("Content-Type", "application/json");
+        return new Response(
+          JSON.stringify(jsonError(
+            new AppError(ErrorCode.INVALID_URL, dnsResult.error || "DNS validation failed", 400),
+            requestId
+          )),
+          { status: 400, headers }
+        );
       }
     } catch (dnsError) {
-      logger.warn(`DNS validation error for ${targetUrl}: ${dnsError}`);
+      // DNS 验证异常：fail-closed，防止攻击者通过触发 DNS 错误绕过 SSRF 防护
+      logger.error(
+        `DNS validation error for ${typeof targetUrl === 'string' ? targetUrl : 'invalid-url'}`,
+        dnsError instanceof Error ? dnsError : undefined,
+        { module: 'Proxy' }
+      );
+      headers.set("Content-Type", "application/json");
+      return new Response(
+        JSON.stringify(jsonError(
+          new AppError(ErrorCode.INVALID_URL, "DNS validation failed", 400),
+          requestId
+        )),
+        { status: 400, headers }
+      );
     }
 
     const response = await proxyService.execute({

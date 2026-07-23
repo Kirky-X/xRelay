@@ -17,6 +17,7 @@ import { validateUrl, validateDnsResolution } from "../src/security.js";
 import { AppError, ErrorCode } from "../src/errors/index.js";
 import { CORS_CONFIG, isProduction, validateProductionConfig } from "../src/config.js";
 import { generateRequestId } from "../src/utils/crypto.js";
+import { logger } from "../src/logger.js";
 import type { ProxyRequest } from "../src/types/index.js";
 import { captureWebpage } from "../src/webpage-capture/index.js";
 import type { CaptureRequest } from "../src/webpage-capture/types.js";
@@ -102,7 +103,19 @@ async function handleCapture(
         return;
       }
     } catch (dnsError) {
-      console.warn(`[Security] DNS validation failed for ${url}:`, dnsError);
+      // DNS 验证失败（包括网络错误）：fail-closed，拒绝请求
+      // 防止攻击者通过触发 DNS 错误绕过 SSRF 防护
+      logger.error(
+        `[Security] DNS validation error for ${typeof url === 'string' ? url : 'invalid-url'}`,
+        dnsError instanceof Error ? dnsError : undefined,
+        { module: 'Capture' }
+      );
+      sendError(
+        res,
+        new AppError(ErrorCode.INVALID_URL, "DNS validation failed", 400),
+        requestId
+      );
+      return;
     }
 
     const result = await captureWebpage(url, options);
@@ -164,15 +177,20 @@ function setSecurityHeaders(res: VercelResponse): void {
 
 /**
  * 设置 CORS 响应头（动态白名单）
+ *
+ * 安全策略：使用显式白名单，不使用通配符 "*"。
+ * 即使在开发模式下，也仅允许配置的本地开发端口，
+ * 避免任意源在共享开发环境中调用受 API Key 保护的端点。
  */
 function setCorsHeaders(res: VercelResponse, origin?: string): void {
   const allowedOrigins = CORS_CONFIG.allowedOrigins;
 
   if (origin && allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
-  } else if (!isProduction()) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    // 允许浏览器在跨域请求中携带凭证（如 Cookie、API Key）
+    res.setHeader("Vary", "Origin");
   }
+  // 不匹配白名单时不设置 Access-Control-Allow-Origin，浏览器会拒绝跨域请求
 
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-api-key");
@@ -280,8 +298,18 @@ export default async function handler(
         return;
       }
     } catch (dnsError) {
-      // DNS 解析失败，记录日志但不阻止请求（降级处理）
-      console.warn(`[Security] DNS validation failed for ${url}:`, dnsError);
+      // DNS 验证异常：fail-closed，防止攻击者通过触发 DNS 错误绕过 SSRF 防护
+      logger.error(
+        `[Security] DNS validation error for ${typeof url === 'string' ? url : 'invalid-url'}`,
+        dnsError instanceof Error ? dnsError : undefined,
+        { module: 'Proxy' }
+      );
+      sendError(
+        res,
+        new AppError(ErrorCode.INVALID_URL, "DNS validation failed", 400),
+        requestId
+      );
+      return;
     }
 
     // 执行代理请求

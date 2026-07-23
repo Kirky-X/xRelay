@@ -146,24 +146,29 @@ export const CORS_CONFIG = {
  */
 export function validateProductionConfig(): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
-  
+
   if (isProduction()) {
     // 生产环境必须配置 API Key
     if (!process.env.API_KEYS || process.env.API_KEYS.trim() === "") {
       errors.push("API_KEYS environment variable must be set in production");
     }
-    
+
     // 生产环境必须启用 API Key 验证
     if (process.env.ENABLE_API_KEY !== "true") {
       errors.push("ENABLE_API_KEY must be set to 'true' in production");
     }
-    
+
+    // 生产环境必须配置 CRON_SECRET，防止未授权触发清理任务
+    if (!process.env.CRON_SECRET || process.env.CRON_SECRET.trim() === "") {
+      errors.push("CRON_SECRET environment variable must be set in production to protect cron endpoints");
+    }
+
     // 生产环境应关闭详细日志
     if (process.env.ENABLE_VERBOSE_LOGGING === "true") {
       console.warn("[Config] WARNING: Verbose logging is enabled in production");
     }
   }
-  
+
   return {
     valid: errors.length === 0,
     errors,

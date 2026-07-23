@@ -21,7 +21,6 @@ import {
   incrementFailureCount,
   incrementSuccessCount,
   deleteProxy,
-  batchInsertProxies,
   getWeightedProxies,
 } from "../available-proxies-dao.js";
 import {
@@ -29,7 +28,6 @@ import {
   isProxyDeprecated,
   getAllDeprecatedProxies,
   getDeprecatedProxyCount,
-  deleteExpiredDeprecatedProxies,
   getDeprecatedProxyStats,
 } from "../deprecated-proxies-dao.js";
 

@@ -30,7 +30,9 @@ services:
     environment:
       NODE_ENV: development
       DATABASE_URL: postgresql://${POSTGRES_USER:-xrelay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-xrelay}
-      ENABLE_API_KEY: "false"
+      # 开发模式默认启用 API Key，需提供 API_KEYS
+      ENABLE_API_KEY: ${ENABLE_API_KEY:-true}
+      API_KEYS: ${API_KEYS:?API_KEYS is required (set in .env)}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

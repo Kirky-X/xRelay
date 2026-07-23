@@ -1,0 +1,15 @@
+repos:
+  - repo: local
+    hooks:
+      - id: eslint
+        name: ESLint
+        entry: npx eslint
+        language: system
+        types_or: [ts, tsx, javascript, jsx]
+        require_serial: false
+      - id: type-check
+        name: TypeScript type check
+        entry: bash -c 'npx tsc --noEmit --project config/tsconfig.json'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

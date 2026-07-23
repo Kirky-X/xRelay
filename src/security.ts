@@ -339,6 +339,7 @@ function evictOldestDnsCacheEntry(): void {
 /**
  * 使用 DNS-over-HTTPS 解析域名
  * 防止 DNS 重绑定攻击
+ * 同时查询 A 和 AAAA 记录，防止攻击者仅通过 IPv6 绕过
  */
 export async function resolveDns(hostname: string): Promise<string[]> {
   // 检查缓存
@@ -347,7 +348,7 @@ export async function resolveDns(hostname: string): Promise<string[]> {
     return cached.ips;
   }
 
-  // 如果是 IP 地址，直接返回
+  // 如果是 IPv4 地址，直接返回
   const ipv4Match = hostname.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
   if (ipv4Match) {
     return [hostname];
@@ -359,31 +360,38 @@ export async function resolveDns(hostname: string): Promise<string[]> {
   }
 
   try {
-    // 使用 Cloudflare DNS-over-HTTPS
-    const response = await fetch(
-      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=A`,
-      {
-        headers: {
-          Accept: 'application/dns-json',
-        },
-      }
-    );
+    // 并行查询 A 和 AAAA 记录，防止攻击者仅通过 IPv6 私有地址绕过校验
+    const dohUrl = (type: 'A' | 'AAAA') =>
+      `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=${type}`;
 
-    if (!response.ok) {
-      throw new Error(`DNS query failed: ${response.status}`);
-    }
+    const [aResp, aaaaResp] = await Promise.allSettled([
+      fetch(dohUrl('A'), { headers: { Accept: 'application/dns-json' } }),
+      fetch(dohUrl('AAAA'), { headers: { Accept: 'application/dns-json' } }),
+    ]);
 
-    const data = await response.json() as { Answer?: { data: string }[] };
-    const ips = data.Answer?.map(a => a.data).filter(Boolean) || [];
+    const ips: string[] = [];
+
+    const extractAnswers = async (resp: PromiseSettledResult<Response>) => {
+      if (resp.status !== 'fulfilled' || !resp.value.ok) return;
+      const data = await resp.value.json() as { Answer?: { data: string }[] };
+      const records = data.Answer?.map(a => a.data).filter(Boolean) || [];
+      ips.push(...records);
+    };
+
+    await extractAnswers(aResp);
+    await extractAnswers(aaaaResp);
+
+    // 去重
+    const uniqueIps = [...new Set(ips)];
 
     // 检查缓存大小限制，超过则删除最旧的条目
     if (dnsCache.size >= MAX_DNS_CACHE_SIZE) {
       evictOldestDnsCacheEntry();
     }
     // 缓存结果
-    dnsCache.set(hostname, { ips, timestamp: Date.now() });
+    dnsCache.set(hostname, { ips: uniqueIps, timestamp: Date.now() });
 
-    return ips;
+    return uniqueIps;
   } catch (error) {
     logger.error(
       `DNS 解析失败: ${hostname}`,

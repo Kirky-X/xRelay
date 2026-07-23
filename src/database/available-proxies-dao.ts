@@ -8,7 +8,7 @@
  * 提供可用代理的 CRUD 操作
  */
 
-import { query, transaction } from "./connection.js";
+import { query } from "./connection.js";
 
 export interface AvailableProxy {
   id?: number;
@@ -118,10 +118,10 @@ export async function getProxiesWithWeight(): Promise<ProxyWithWeight[]> {
 
 /**
  * 计算代理权重
+ * 使用 Laplace 平滑公式，与 DB 触发器 weight_score 保持一致
  */
 function calculateWeight(proxy: AvailableProxy): number {
-  const total = proxy.success_count + proxy.failure_count + 1;
-  return proxy.success_count / total;
+  return (proxy.success_count + 1) / (proxy.success_count + proxy.failure_count + 2);
 }
 
 /**

@@ -1,13 +1,13 @@
-import { vi } from 'vitest';
+import { vi } from "vitest";
 
 export function createMockKV() {
   const store = new Map<string, any>();
-  
+
   return {
     get: vi.fn((key: string) => Promise.resolve(store.get(key))),
-    set: vi.fn((key: string, value: any, options?: { px?: number }) => {
+    set: vi.fn((key: string, value: any, _options?: { px?: number }) => {
       store.set(key, value);
-      return Promise.resolve('OK');
+      return Promise.resolve("OK");
     }),
     del: vi.fn((key: string) => {
       const existed = store.has(key);
@@ -19,7 +19,7 @@ export function createMockKV() {
       store.set(key, current);
       return Promise.resolve(current);
     }),
-    pexpire: vi.fn((key: string, ms: number) => {
+    pexpire: vi.fn((key: string, _ms: number) => {
       return Promise.resolve(store.has(key) ? 1 : 0);
     }),
     pttl: vi.fn((key: string) => {
@@ -27,7 +27,7 @@ export function createMockKV() {
     }),
     scanIterator: vi.fn(function* (options?: { match?: string }) {
       for (const key of store.keys()) {
-        if (options?.match && !key.includes(options.match.replace('*', ''))) {
+        if (options?.match && !key.includes(options.match.replace("*", ""))) {
           continue;
         }
         yield key;

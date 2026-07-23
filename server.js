@@ -2,11 +2,41 @@
 import { createServer } from 'http';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, normalize, sep } from 'path';
 import handler from './dist/api/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const DIST_ROOT = normalize(join(__dirname, 'dist'));
+
+/**
+ * 安全解析静态文件路径，防止路径遍历
+ * 确保解析后的绝对路径仍位于 dist 目录内
+ */
+function safeResolveStaticPath(requestUrl) {
+  if (requestUrl === '/' || requestUrl === '') {
+    return join(DIST_ROOT, 'index.html');
+  }
+  // 移除查询参数和 hash
+  const cleanPath = requestUrl.split('?')[0].split('#')[0];
+  // normalize 会处理 ../, ./ 等；decodeURIComponent 处理 %2e%2e 等编码
+  let decoded;
+  try {
+    decoded = decodeURIComponent(cleanPath);
+  } catch {
+    return null;
+  }
+  // 拒绝包含空字节或控制字符
+  if (/[\x00-\x1f\x7f]/.test(decoded)) {
+    return null;
+  }
+  const filePath = normalize(join(DIST_ROOT, decoded));
+  // 关键：验证解析后的路径仍在 dist 目录内
+  if (filePath !== DIST_ROOT && !filePath.startsWith(DIST_ROOT + sep)) {
+    return null;
+  }
+  return filePath;
+}
 
 const PORT = 3000;
 
@@ -60,15 +90,22 @@ const server = createServer(async (req, res) => {
   // 处理静态文件请求
   else {
     try {
-      let filePath = join(__dirname, 'dist', req.url === '/' ? 'index.html' : req.url);
-      
+      const filePath = safeResolveStaticPath(req.url);
+
+      // 路径遍历攻击或无效路径：直接返回 404
+      if (!filePath) {
+        res.statusCode = 404;
+        res.end('Not Found');
+        return;
+      }
+
       // 如果是 API 路由但文件不存在，返回 404
       if (filePath.includes('/api/')) {
         res.statusCode = 404;
         res.end('Not Found');
         return;
       }
-      
+
       const content = readFileSync(filePath);
       const ext = filePath.split('.').pop();
       const contentTypes = {

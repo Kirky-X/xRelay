@@ -8,7 +8,7 @@
  * 测试缓存、限流、安全验证等功能
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getCachedResponse,
   cacheResponse,

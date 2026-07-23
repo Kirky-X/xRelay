@@ -5,18 +5,18 @@
 
 /**
  * 网页捕获模块 - 资源处理器
- * 
+ *
  * 功能：
  * - 收集页面中的所有外部资源
  * - 获取跨域资源（通过代理服务）
  * - 将资源转换为 Data URI
  */
 
-import type { Page, ElementHandle } from 'puppeteer';
-import type { ResourceInfo, ResourceStats, CaptureOptions } from './types.js';
-import { RESOURCE_CONFIG } from './config.js';
-import { logger } from '../logger.js';
-import { validateUrl, validateDnsResolution } from '../security.js';
+import type { Page, ElementHandle } from "puppeteer";
+import type { ResourceInfo, ResourceStats, CaptureOptions } from "./types.js";
+import { RESOURCE_CONFIG } from "./config.js";
+import { logger } from "../logger.js";
+import { validateUrl, validateDnsResolution } from "../security.js";
 
 /**
  * 资源处理器
@@ -43,7 +43,7 @@ export class ResourceProcessor {
   private async processBatch<T, R>(
     items: T[],
     processor: (item: T) => Promise<R>,
-    concurrency: number = RESOURCE_CONFIG.concurrency
+    concurrency: number = RESOURCE_CONFIG.concurrency,
   ): Promise<R[]> {
     const results: R[] = [];
 
@@ -60,15 +60,19 @@ export class ResourceProcessor {
    * 处理页面中的所有资源
    */
   public async processResources(page: Page): Promise<string> {
-    logger.info('Starting resource processing', { module: 'ResourceProcessor' });
+    logger.info("Starting resource processing", {
+      module: "ResourceProcessor",
+    });
 
     let html: string;
     try {
       html = await page.content();
     } catch (error) {
-      if (error instanceof Error && error.message.includes('detached')) {
-        logger.error('Page detached before processing started', error, { module: 'ResourceProcessor' });
-        throw new Error('Page is no longer available');
+      if (error instanceof Error && error.message.includes("detached")) {
+        logger.error("Page detached before processing started", error, {
+          module: "ResourceProcessor",
+        });
+        throw new Error("Page is no longer available");
       }
       throw error;
     }
@@ -76,8 +80,11 @@ export class ResourceProcessor {
     try {
       html = await this.processImages(page, html);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('detached')) {
-        logger.warn('Page detached during image processing, continuing with partial result', { module: 'ResourceProcessor' });
+      if (error instanceof Error && error.message.includes("detached")) {
+        logger.warn(
+          "Page detached during image processing, continuing with partial result",
+          { module: "ResourceProcessor" },
+        );
       } else {
         throw error;
       }
@@ -86,8 +93,11 @@ export class ResourceProcessor {
     try {
       html = await this.processStyles(page, html);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('detached')) {
-        logger.warn('Page detached during style processing, continuing with partial result', { module: 'ResourceProcessor' });
+      if (error instanceof Error && error.message.includes("detached")) {
+        logger.warn(
+          "Page detached during style processing, continuing with partial result",
+          { module: "ResourceProcessor" },
+        );
       } else {
         throw error;
       }
@@ -96,8 +106,11 @@ export class ResourceProcessor {
     try {
       html = await this.processFonts(page, html);
     } catch (error) {
-      if (error instanceof Error && error.message.includes('detached')) {
-        logger.warn('Page detached during font processing, continuing with partial result', { module: 'ResourceProcessor' });
+      if (error instanceof Error && error.message.includes("detached")) {
+        logger.warn(
+          "Page detached during font processing, continuing with partial result",
+          { module: "ResourceProcessor" },
+        );
       } else {
         throw error;
       }
@@ -107,8 +120,11 @@ export class ResourceProcessor {
       try {
         html = await this.processIframes(page, html);
       } catch (error) {
-        if (error instanceof Error && error.message.includes('detached')) {
-          logger.warn('Page detached during iframe processing, continuing with partial result', { module: 'ResourceProcessor' });
+        if (error instanceof Error && error.message.includes("detached")) {
+          logger.warn(
+            "Page detached during iframe processing, continuing with partial result",
+            { module: "ResourceProcessor" },
+          );
         } else {
           throw error;
         }
@@ -123,8 +139,8 @@ export class ResourceProcessor {
       html = this.removeHtmlComments(html);
     }
 
-    logger.info('Resource processing complete', {
-      module: 'ResourceProcessor',
+    logger.info("Resource processing complete", {
+      module: "ResourceProcessor",
       stats: this.stats,
     });
 
@@ -136,7 +152,7 @@ export class ResourceProcessor {
    */
   private async processImages(page: Page, html: string): Promise<string> {
     try {
-      const images = await page.$$('img[src]');
+      const images = await page.$$("img[src]");
       const processedUrls = new Map<string, string>();
       const baseUrl = page.url();
 
@@ -146,17 +162,23 @@ export class ResourceProcessor {
         success: boolean;
       }
 
-      const processImage = async (img: ElementHandle<Element>): Promise<ImageResult> => {
+      const processImage = async (
+        img: ElementHandle<Element>,
+      ): Promise<ImageResult> => {
         try {
-          const src = await img.evaluate((el) => el.getAttribute('src'));
-          if (!src || src.startsWith('data:')) {
-            return { originalSrc: src || '', success: false };
+          const src = await img.evaluate((el) => el.getAttribute("src"));
+          if (!src || src.startsWith("data:")) {
+            return { originalSrc: src || "", success: false };
           }
 
           const absoluteUrl = this.resolveUrl(src, baseUrl);
 
           if (processedUrls.has(absoluteUrl)) {
-            return { originalSrc: src, dataUri: processedUrls.get(absoluteUrl), success: true };
+            return {
+              originalSrc: src,
+              dataUri: processedUrls.get(absoluteUrl),
+              success: true,
+            };
           }
 
           const resource = await this.fetchResource(absoluteUrl);
@@ -167,8 +189,8 @@ export class ResourceProcessor {
             return { originalSrc: src, dataUri, success: true };
           }
           return { originalSrc: src, success: false };
-        } catch (error) {
-          return { originalSrc: '', success: false };
+        } catch {
+          return { originalSrc: "", success: false };
         }
       };
 
@@ -177,15 +199,17 @@ export class ResourceProcessor {
       let processedHtml = html;
       for (const result of results) {
         if (result.success && result.dataUri && result.originalSrc) {
-          processedHtml = processedHtml.split(result.originalSrc).join(result.dataUri);
+          processedHtml = processedHtml
+            .split(result.originalSrc)
+            .join(result.dataUri);
         }
       }
 
       try {
-        const srcsetImages = await page.$$('[srcset]');
+        const srcsetImages = await page.$$("[srcset]");
         for (const el of srcsetImages) {
           try {
-            const srcset = await el.evaluate((el) => el.getAttribute('srcset'));
+            const srcset = await el.evaluate((el) => el.getAttribute("srcset"));
             if (!srcset) continue;
 
             const newSrcset = await this.processSrcset(srcset, page.url());
@@ -193,16 +217,22 @@ export class ResourceProcessor {
               processedHtml = processedHtml.replace(srcset, newSrcset);
             }
           } catch (error) {
-            if (error instanceof Error && error.message.includes('detached')) {
-              logger.debug(`Element detached while processing srcset`, { module: 'ResourceProcessor' });
+            if (error instanceof Error && error.message.includes("detached")) {
+              logger.debug(`Element detached while processing srcset`, {
+                module: "ResourceProcessor",
+              });
             } else {
-              logger.debug(`Failed to process srcset: ${error}`, { module: 'ResourceProcessor' });
+              logger.debug(`Failed to process srcset: ${error}`, {
+                module: "ResourceProcessor",
+              });
             }
           }
         }
       } catch (error) {
-        if (error instanceof Error && error.message.includes('detached')) {
-          logger.debug(`Page detached while querying srcset elements`, { module: 'ResourceProcessor' });
+        if (error instanceof Error && error.message.includes("detached")) {
+          logger.debug(`Page detached while querying srcset elements`, {
+            module: "ResourceProcessor",
+          });
         } else {
           throw error;
         }
@@ -210,8 +240,10 @@ export class ResourceProcessor {
 
       return processedHtml;
     } catch (error) {
-      if (error instanceof Error && error.message.includes('detached')) {
-        logger.debug(`Page detached during image processing`, { module: 'ResourceProcessor' });
+      if (error instanceof Error && error.message.includes("detached")) {
+        logger.debug(`Page detached during image processing`, {
+          module: "ResourceProcessor",
+        });
         return html;
       }
       throw error;
@@ -221,13 +253,16 @@ export class ResourceProcessor {
   /**
    * 处理 srcset 属性
    */
-  private async processSrcset(srcset: string, baseUrl: string): Promise<string> {
-    const parts = srcset.split(',').map((part) => part.trim());
+  private async processSrcset(
+    srcset: string,
+    baseUrl: string,
+  ): Promise<string> {
+    const parts = srcset.split(",").map((part) => part.trim());
     const processedParts: string[] = [];
 
     for (const part of parts) {
       const [url, descriptor] = part.split(/\s+/);
-      if (!url || url.startsWith('data:')) {
+      if (!url || url.startsWith("data:")) {
         processedParts.push(part);
         continue;
       }
@@ -244,7 +279,7 @@ export class ResourceProcessor {
       }
     }
 
-    return processedParts.join(', ');
+    return processedParts.join(", ");
   }
 
   /**
@@ -262,16 +297,22 @@ export class ResourceProcessor {
         success: boolean;
       }
 
-      const processLink = async (link: ElementHandle<Element>): Promise<StyleResult> => {
+      const processLink = async (
+        link: ElementHandle<Element>,
+      ): Promise<StyleResult> => {
         try {
-          const href = await link.evaluate((el) => el.getAttribute('href'));
-          if (!href || href.startsWith('data:')) {
-            return { href: href || '', success: false };
+          const href = await link.evaluate((el) => el.getAttribute("href"));
+          if (!href || href.startsWith("data:")) {
+            return { href: href || "", success: false };
           }
 
           const absoluteUrl = this.resolveUrl(href, baseUrl);
           if (processedUrls.has(absoluteUrl)) {
-            return { href, cssContent: processedUrls.get(absoluteUrl), success: true };
+            return {
+              href,
+              cssContent: processedUrls.get(absoluteUrl),
+              success: true,
+            };
           }
 
           const resource = await this.fetchResource(absoluteUrl);
@@ -283,8 +324,8 @@ export class ResourceProcessor {
             return { href, cssContent: processedCss, success: true };
           }
           return { href, success: false };
-        } catch (error) {
-          return { href: '', success: false };
+        } catch {
+          return { href: "", success: false };
         }
       };
 
@@ -293,30 +334,42 @@ export class ResourceProcessor {
       let processedHtml = html;
       for (const result of results) {
         if (result.success && result.cssContent && result.href) {
-          processedHtml = this.replaceLinkWithStyle(processedHtml, result.href, result.cssContent);
+          processedHtml = this.replaceLinkWithStyle(
+            processedHtml,
+            result.href,
+            result.cssContent,
+          );
         }
       }
 
       try {
-        const inlineStyles = await page.$$('style');
+        const inlineStyles = await page.$$("style");
         for (const style of inlineStyles) {
           try {
-            const cssContent = await style.evaluate((el) => el.textContent || '');
+            const cssContent = await style.evaluate(
+              (el) => el.textContent || "",
+            );
             const processedCss = await this.processCssUrls(cssContent, baseUrl);
             if (processedCss !== cssContent) {
               processedHtml = processedHtml.replace(cssContent, processedCss);
             }
           } catch (error) {
-            if (error instanceof Error && error.message.includes('detached')) {
-              logger.debug(`Style element detached while processing`, { module: 'ResourceProcessor' });
+            if (error instanceof Error && error.message.includes("detached")) {
+              logger.debug(`Style element detached while processing`, {
+                module: "ResourceProcessor",
+              });
             } else {
-              logger.debug(`Failed to process inline style: ${error}`, { module: 'ResourceProcessor' });
+              logger.debug(`Failed to process inline style: ${error}`, {
+                module: "ResourceProcessor",
+              });
             }
           }
         }
       } catch (error) {
-        if (error instanceof Error && error.message.includes('detached')) {
-          logger.debug(`Page detached while querying style elements`, { module: 'ResourceProcessor' });
+        if (error instanceof Error && error.message.includes("detached")) {
+          logger.debug(`Page detached while querying style elements`, {
+            module: "ResourceProcessor",
+          });
         } else {
           throw error;
         }
@@ -324,8 +377,10 @@ export class ResourceProcessor {
 
       return processedHtml;
     } catch (error) {
-      if (error instanceof Error && error.message.includes('detached')) {
-        logger.debug(`Page detached during style processing`, { module: 'ResourceProcessor' });
+      if (error instanceof Error && error.message.includes("detached")) {
+        logger.debug(`Page detached during style processing`, {
+          module: "ResourceProcessor",
+        });
         return html;
       }
       throw error;
@@ -351,9 +406,9 @@ export class ResourceProcessor {
         const dataUri = `data:${resource.mimeType};base64,${resource.content}`;
         processedUrls.set(originalUrl, dataUri);
 
-        if (resource.mimeType?.startsWith('image/')) {
+        if (resource.mimeType?.startsWith("image/")) {
           this.stats.images++;
-        } else if (resource.mimeType?.includes('font')) {
+        } else if (resource.mimeType?.includes("font")) {
           this.stats.fonts++;
         }
       }
@@ -362,8 +417,8 @@ export class ResourceProcessor {
     let processedCss = css;
     for (const [originalUrl, dataUri] of processedUrls) {
       processedCss = processedCss.replace(
-        new RegExp(`url\\(['"]?${this.escapeRegex(originalUrl)}['"]?\\)`, 'gi'),
-        `url(${dataUri})`
+        new RegExp(`url\\(['"]?${this.escapeRegex(originalUrl)}['"]?\\)`, "gi"),
+        `url(${dataUri})`,
       );
     }
 
@@ -376,10 +431,10 @@ export class ResourceProcessor {
   private async processFonts(page: Page, html: string): Promise<string> {
     try {
       const fontFaces = await page.evaluate(() => {
-        const styles = document.querySelectorAll('style');
+        const styles = document.querySelectorAll("style");
         const fonts: string[] = [];
         styles.forEach((style) => {
-          const content = style.textContent || '';
+          const content = style.textContent || "";
           const fontFaceMatches = content.match(/@font-face\s*\{[^}]+\}/gi);
           if (fontFaceMatches) {
             fonts.push(...fontFaceMatches);
@@ -397,19 +452,26 @@ export class ResourceProcessor {
 
       for (const fontFace of fontFaces) {
         try {
-          const processedFontFace = await this.processCssUrls(fontFace, baseUrl);
+          const processedFontFace = await this.processCssUrls(
+            fontFace,
+            baseUrl,
+          );
           if (processedFontFace !== fontFace) {
             html = html.replace(fontFace, processedFontFace);
           }
         } catch (error) {
-          logger.debug(`Failed to process font face: ${error}`, { module: 'ResourceProcessor' });
+          logger.debug(`Failed to process font face: ${error}`, {
+            module: "ResourceProcessor",
+          });
         }
       }
 
       return html;
     } catch (error) {
-      if (error instanceof Error && error.message.includes('detached')) {
-        logger.debug(`Page detached during font processing`, { module: 'ResourceProcessor' });
+      if (error instanceof Error && error.message.includes("detached")) {
+        logger.debug(`Page detached during font processing`, {
+          module: "ResourceProcessor",
+        });
         return html;
       }
       throw error;
@@ -421,12 +483,13 @@ export class ResourceProcessor {
    */
   private async processIframes(page: Page, html: string): Promise<string> {
     try {
-      const iframes = await page.$$('iframe[src]');
+      const iframes = await page.$$("iframe[src]");
 
       for (const iframe of iframes) {
         try {
-          const src = await iframe.evaluate((el) => el.getAttribute('src'));
-          if (!src || src.startsWith('data:') || src.startsWith('javascript:')) continue;
+          const src = await iframe.evaluate((el) => el.getAttribute("src"));
+          if (!src || src.startsWith("data:") || src.startsWith("javascript:"))
+            continue;
 
           try {
             const frame = await iframe.contentFrame();
@@ -435,21 +498,30 @@ export class ResourceProcessor {
               if (frameContent) {
                 const placeholder = `<!-- iframe: ${src} -->`;
                 html = html.replace(
-                  new RegExp(`<iframe[^>]*src=["']${this.escapeRegex(src)}["'][^>]*>.*?</iframe>`, 'gis'),
-                  placeholder
+                  new RegExp(
+                    `<iframe[^>]*src=["']${this.escapeRegex(src)}["'][^>]*>.*?</iframe>`,
+                    "gis",
+                  ),
+                  placeholder,
                 );
                 this.stats.iframes++;
               }
             }
-          } catch (frameError) {
-            logger.debug(`Frame already detached or inaccessible: ${src}`, { module: 'ResourceProcessor' });
+          } catch {
+            logger.debug(`Frame already detached or inaccessible: ${src}`, {
+              module: "ResourceProcessor",
+            });
           }
         } catch (error) {
-          logger.debug(`Failed to process iframe: ${error}`, { module: 'ResourceProcessor' });
+          logger.debug(`Failed to process iframe: ${error}`, {
+            module: "ResourceProcessor",
+          });
         }
       }
     } catch (error) {
-      logger.debug(`Failed to query iframes: ${error}`, { module: 'ResourceProcessor' });
+      logger.debug(`Failed to query iframes: ${error}`, {
+        module: "ResourceProcessor",
+      });
     }
 
     return html;
@@ -459,10 +531,13 @@ export class ResourceProcessor {
    * 移除脚本标签
    */
   private removeScriptTags(html: string): string {
-    html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-    html = html.replace(/<script\b[^>]*\/>/gi, '');
-    html = html.replace(/on\w+\s*=\s*["'][^"']*["']/gi, '');
-    html = html.replace(/javascript:/gi, '');
+    html = html.replace(
+      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+      "",
+    );
+    html = html.replace(/<script\b[^>]*\/>/gi, "");
+    html = html.replace(/on\w+\s*=\s*["'][^"']*["']/gi, "");
+    html = html.replace(/javascript:/gi, "");
     this.stats.scripts = 0;
     return html;
   }
@@ -471,7 +546,7 @@ export class ResourceProcessor {
    * 移除 HTML 注释
    */
   private removeHtmlComments(html: string): string {
-    return html.replace(/<!--[\s\S]*?-->/g, '');
+    return html.replace(/<!--[\s\S]*?-->/g, "");
   }
 
   /**
@@ -488,7 +563,9 @@ export class ResourceProcessor {
     const urlValidation = validateUrl(url);
     if (!urlValidation.valid) {
       resource.error = `URL validation failed: ${urlValidation.error}`;
-      logger.debug(`Resource URL blocked: ${url} - ${urlValidation.error}`, { module: 'ResourceProcessor' });
+      logger.debug(`Resource URL blocked: ${url} - ${urlValidation.error}`, {
+        module: "ResourceProcessor",
+      });
       return resource;
     }
 
@@ -498,11 +575,13 @@ export class ResourceProcessor {
       const dnsResult = await validateDnsResolution(parsedUrl.hostname);
       if (!dnsResult.valid) {
         resource.error = `DNS validation failed: ${dnsResult.error}`;
-        logger.debug(`Resource DNS blocked: ${url} - ${dnsResult.error}`, { module: 'ResourceProcessor' });
+        logger.debug(`Resource DNS blocked: ${url} - ${dnsResult.error}`, {
+          module: "ResourceProcessor",
+        });
         return resource;
       }
     } catch (error) {
-      resource.error = `DNS resolution failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      resource.error = `DNS resolution failed: ${error instanceof Error ? error.message : "Unknown error"}`;
       return resource;
     }
 
@@ -510,14 +589,14 @@ export class ResourceProcessor {
       const controller = new AbortController();
       const timeoutId = setTimeout(
         () => controller.abort(),
-        RESOURCE_CONFIG.fetchTimeout
+        RESOURCE_CONFIG.fetchTimeout,
       );
 
       const response = await fetch(url, {
         signal: controller.signal,
         headers: {
-          'User-Agent': this.options.userAgent,
-          Accept: '*/*',
+          "User-Agent": this.options.userAgent,
+          Accept: "*/*",
         },
       });
 
@@ -528,8 +607,9 @@ export class ResourceProcessor {
         return resource;
       }
 
-      const contentType = response.headers.get('content-type') || 'application/octet-stream';
-      resource.mimeType = contentType.split(';')[0].trim();
+      const contentType =
+        response.headers.get("content-type") || "application/octet-stream";
+      resource.mimeType = contentType.split(";")[0].trim();
 
       const buffer = await response.arrayBuffer();
       const size = buffer.byteLength;
@@ -539,11 +619,13 @@ export class ResourceProcessor {
         return resource;
       }
 
-      resource.content = Buffer.from(buffer).toString('base64');
+      resource.content = Buffer.from(buffer).toString("base64");
       resource.success = true;
     } catch (error) {
-      resource.error = error instanceof Error ? error.message : 'Unknown error';
-      logger.debug(`Failed to fetch resource ${url}: ${resource.error}`, { module: 'ResourceProcessor' });
+      resource.error = error instanceof Error ? error.message : "Unknown error";
+      logger.debug(`Failed to fetch resource ${url}: ${resource.error}`, {
+        module: "ResourceProcessor",
+      });
     }
 
     return resource;
@@ -552,23 +634,25 @@ export class ResourceProcessor {
   /**
    * 获取资源类型
    */
-  private getResourceType(url: string): ResourceInfo['type'] {
-    const ext = url.split('.').pop()?.toLowerCase()?.split('?')[0] || '';
+  private getResourceType(url: string): ResourceInfo["type"] {
+    const ext = url.split(".").pop()?.toLowerCase()?.split("?")[0] || "";
 
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext)) {
-      return 'image';
+    if (
+      ["jpg", "jpeg", "png", "gif", "webp", "svg", "ico", "bmp"].includes(ext)
+    ) {
+      return "image";
     }
-    if (['css'].includes(ext)) {
-      return 'style';
+    if (["css"].includes(ext)) {
+      return "style";
     }
-    if (['js'].includes(ext)) {
-      return 'script';
+    if (["js"].includes(ext)) {
+      return "script";
     }
-    if (['woff', 'woff2', 'ttf', 'otf', 'eot'].includes(ext)) {
-      return 'font';
+    if (["woff", "woff2", "ttf", "otf", "eot"].includes(ext)) {
+      return "font";
     }
 
-    return 'other';
+    return "other";
   }
 
   /**
@@ -576,10 +660,14 @@ export class ResourceProcessor {
    */
   private resolveUrl(url: string, baseUrl: string): string {
     try {
-      if (url.startsWith('//')) {
+      if (url.startsWith("//")) {
         return `https:${url}`;
       }
-      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      if (
+        url.startsWith("http://") ||
+        url.startsWith("https://") ||
+        url.startsWith("data:")
+      ) {
         return url;
       }
       return new URL(url, baseUrl).href;
@@ -591,11 +679,15 @@ export class ResourceProcessor {
   /**
    * 替换 link 标签为 style 标签
    */
-  private replaceLinkWithStyle(html: string, href: string, cssContent: string): string {
+  private replaceLinkWithStyle(
+    html: string,
+    href: string,
+    cssContent: string,
+  ): string {
     const escapedHref = this.escapeRegex(href);
     const regex = new RegExp(
       `<link[^>]*href=["']${escapedHref}["'][^>]*rel=["']stylesheet["'][^>]*>`,
-      'gi'
+      "gi",
     );
     return html.replace(regex, `<style>\n${cssContent}\n</style>`);
   }
@@ -605,7 +697,7 @@ export class ResourceProcessor {
    */
   private decodeBase64(base64: string): string {
     try {
-      return Buffer.from(base64, 'base64').toString('utf-8');
+      return Buffer.from(base64, "base64").toString("utf-8");
     } catch {
       return base64;
     }
@@ -615,7 +707,7 @@ export class ResourceProcessor {
    * 转义正则表达式特殊字符
    */
   private escapeRegex(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   /**
@@ -630,7 +722,7 @@ export class ResourceProcessor {
  * 创建资源处理器
  */
 export function createResourceProcessor(
-  options: Required<CaptureOptions>
+  options: Required<CaptureOptions>,
 ): ResourceProcessor {
   return new ResourceProcessor(options);
 }

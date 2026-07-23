@@ -7,7 +7,7 @@
 import type { ProxyInfo } from "../../types/index.js";
 import type { PoolStatus, ProxyStats } from "./types.js";
 import { logger } from "../../logger.js";
-import { initDatabase, isDatabaseReady } from "../../database/connection.js";
+import { initDatabase } from "../../database/connection.js";
 
 import * as CircuitBreaker from "./circuit-breaker.js";
 import * as DatabaseMode from "./database-mode.js";

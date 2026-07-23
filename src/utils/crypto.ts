@@ -11,25 +11,30 @@
 /**
  * 常量时间字符串比较（防止时序攻击）
  * 兼容 Edge Runtime，不依赖 Node.js crypto 模块
- * 
+ *
+ * 实现说明：将两个字符串用 0 填充到相同长度后逐字节 XOR 比较，
+ * 长度差异也参与结果计算，避免通过响应时间泄漏长度信息。
+ *
  * @param a 第一个字符串
  * @param b 第二个字符串
  * @returns 是否相等
  */
 export function timingSafeEqualString(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  
   const encoder = new TextEncoder();
   const aBytes = encoder.encode(a);
   const bBytes = encoder.encode(b);
-  
-  let result = 0;
-  for (let i = 0; i < aBytes.length; i++) {
-    result |= aBytes[i] ^ bBytes[i];
+
+  // 长度差异参与比较结果（长度不等时必为 false）
+  let result = aBytes.length ^ bBytes.length;
+
+  // 用 0 填充到较长长度，逐字节常量时间比较
+  const maxLen = Math.max(aBytes.length, bBytes.length);
+  for (let i = 0; i < maxLen; i++) {
+    const aByte = i < aBytes.length ? aBytes[i] : 0;
+    const bByte = i < bBytes.length ? bBytes[i] : 0;
+    result |= aByte ^ bByte;
   }
-  
+
   return result === 0;
 }
 

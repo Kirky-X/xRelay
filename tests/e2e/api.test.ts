@@ -408,7 +408,8 @@ describe("API 端到端测试", () => {
   });
 
   describe("CORS 头", () => {
-    it("非生产环境应允许所有 origin", async () => {
+    it("非白名单 origin 不应设置 Access-Control-Allow-Origin（白名单策略）", async () => {
+      // 安全策略：使用显式白名单，不再使用通配符 "*"
       // 默认 NODE_ENV=test，非生产
       const req = createMockReq({
         method: "GET",
@@ -419,8 +420,23 @@ describe("API 端到端测试", () => {
 
       await callHandler(req, res);
 
-      expect(res.headers["Access-Control-Allow-Origin"]).toBe("*");
+      // example.com 不在白名单中，不应设置 ACAO 头
+      expect(res.headers["Access-Control-Allow-Origin"]).toBeUndefined();
       expect(res.headers["Access-Control-Allow-Methods"]).toBeDefined();
+    });
+
+    it("白名单 origin 应设置 Access-Control-Allow-Origin", async () => {
+      const req = createMockReq({
+        method: "GET",
+        url: "/api",
+        headers: { origin: "http://localhost:3000" },
+      });
+      const res = createMockRes();
+
+      await callHandler(req, res);
+
+      expect(res.headers["Access-Control-Allow-Origin"]).toBe("http://localhost:3000");
+      expect(res.headers["Vary"]).toBe("Origin");
     });
 
     it("CORS 预检应返回 Allow-Methods", async () => {

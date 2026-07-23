@@ -8,7 +8,7 @@
  * 测试 IPv6 验证、DNS 重绑定防护、代理端口验证、特殊字符 URL 等
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   validateUrl,
   isValidPublicIp,

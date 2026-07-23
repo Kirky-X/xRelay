@@ -5,7 +5,7 @@
 import type { ProxyInfo } from "../../types/index.js";
 import type { ProxyPoolState, PoolStatus } from "./types.js";
 import { fetchAllProxies } from "../../proxy-fetcher.js";
-import { quickTestProxies, cleanupBlacklist } from "../../proxy-tester.js";
+import { quickTestProxies, cleanupBlacklist, getBlacklistStatus } from "../../proxy-tester.js";
 import { PROXY_CONFIG } from "../../config.js";
 import { logger } from "../../logger.js";
 import { isCircuitOpen, recordFailure, recordSuccess } from "./circuit-breaker.js";
@@ -151,8 +151,8 @@ export function reportProxyFailedToMemory(proxy: ProxyInfo): void {
 /**
  * 向内存报告代理成功
  */
-export function reportProxySuccessToMemory(_proxy: ProxyInfo): void {
-  const proxyKey = `${_proxy.ip}:${_proxy.port}`;
+export function reportProxySuccessToMemory(proxy: ProxyInfo): void {
+  const proxyKey = `${proxy.ip}:${proxy.port}`;
   recordSuccess(proxyKey);
 }
 
@@ -164,7 +164,7 @@ export function getMemoryStatus(): PoolStatus {
     availableCount: proxyPool.availableProxies.length,
     lastRefreshTime: proxyPool.lastRefreshTime,
     refreshCount: proxyPool.refreshCount,
-    blacklistSize: 0,
+    blacklistSize: getBlacklistStatus().size,
     mode: "memory",
   };
 }

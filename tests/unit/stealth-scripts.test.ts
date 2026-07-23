@@ -91,7 +91,7 @@ describe("stealth-scripts", () => {
       // 在 Node.js 中执行必然 ReferenceError，因此仅验证语法合法性，不强制执行
       for (const script of STEALTH_SCRIPTS) {
         expect(() => {
-          // eslint-disable-next-line no-new-func
+           
           new Function(script.code);
         }).not.toThrow();
       }

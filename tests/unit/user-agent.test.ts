@@ -12,7 +12,7 @@
  * 4. getDefaultUserAgent 返回稳定默认值
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   USER_AGENTS,
   getRandomUserAgent,

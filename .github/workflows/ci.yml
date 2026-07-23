@@ -26,8 +26,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
-          cache: 'npm'
+          node-version: "20.x"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
@@ -36,7 +36,7 @@ jobs:
         run: npx tsc --noEmit --project config/tsconfig.json
 
       - name: Run ESLint
-        run: npx eslint . --ext .ts,.tsx,.vue --max-warnings 0 || true
+        run: npx eslint .
 
   test:
     name: Test (Node ${{ matrix.node-version }})
@@ -54,7 +54,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
@@ -84,8 +84,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
-          cache: 'npm'
+          node-version: "20.x"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
@@ -111,11 +111,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
-          cache: 'npm'
+          node-version: "20.x"
+          cache: "npm"
 
       - name: Run npm audit
-        run: npm audit --audit-level=high || true
+        run: npm audit --audit-level=high
         continue-on-error: true
 
   dependency-review:
@@ -129,7 +129,6 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
-        continue-on-error: true
 
   ci-success:
     name: CI Success

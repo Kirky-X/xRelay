@@ -6,7 +6,7 @@
 /**
  * Database Cleanup - 数据库清理模块
  * 由 Vercel Cron Jobs 定期调用，清理过期的废弃代理
- * 
+ *
  * 注意：在 Vercel 无服务器环境中，setInterval 不会持久运行。
  * 清理任务通过 /api/cron/cleanup 端点由 Vercel Cron Jobs 触发。
  */
@@ -40,9 +40,6 @@ export async function runCleanup(): Promise<{
   console.log("[Cleanup] Starting cleanup task...");
 
   try {
-    // 获取清理前的统计信息
-    const statsBefore = await getDeprecatedProxyStats();
-
     // 删除过期的废弃代理
     const deletedCount = await deleteExpiredDeprecatedProxies(
       DATABASE_CONFIG.deprecatedRetentionDays,

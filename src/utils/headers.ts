@@ -12,8 +12,8 @@ export function getHeaderValue(
 ): string | null {
   if (headers && typeof headers.get === "function") {
     return headers.get(name);
-  } else if (headers && (headers as Record<string, string>)[name]) {
-    return (headers as Record<string, string>)[name];
+  } else if (headers && Object.prototype.hasOwnProperty.call(headers, name)) {
+    return (headers as Record<string, string>)[name] ?? null;
   }
   return null;
 }

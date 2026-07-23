@@ -30,12 +30,14 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-xrelay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-xrelay}
-      ENABLE_API_KEY: ${ENABLE_API_KEY:-false}
-      API_KEYS: ${API_KEYS:-}
+      # 生产环境默认启用 API Key 验证，需通过 API_KEYS 提供密钥
+      ENABLE_API_KEY: ${ENABLE_API_KEY:-true}
+      API_KEYS: ${API_KEYS:?API_KEYS is required in production}
       KV_REST_API_URL: ${KV_REST_API_URL:-}
       KV_REST_API_TOKEN: ${KV_REST_API_TOKEN:-}
     ports:
-      - "3000:3000"
+      # 仅绑定到回环地址，外部访问应通过反向代理
+      - "127.0.0.1:3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
