@@ -4,6 +4,9 @@
 
 set -e
 
+# 切换到脚本所在目录（docker/），使 compose 文件路径相对此目录解析
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
 echo "🚀 xRelay Docker 部署测试"
 echo "========================"
 

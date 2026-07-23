@@ -24,8 +24,8 @@ services:
   # xRelay 应用
   app:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: xrelay-app
     environment:
       NODE_ENV: production

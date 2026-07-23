@@ -11,12 +11,14 @@
 
 ### 1. 使用测试脚本（推荐）
 
+> 所有命令需在**项目根目录**执行（compose 文件位于 `docker/` 子目录）。
+
 ```bash
 # 给脚本添加执行权限
-chmod +x docker-test.sh
+chmod +x docker/docker-test.sh
 
 # 运行测试脚本
-./docker-test.sh
+./docker/docker-test.sh
 ```
 
 测试脚本提供以下功能：
@@ -34,27 +36,27 @@ chmod +x docker-test.sh
 #### 生产环境
 
 ```bash
-# 启动所有服务
-docker-compose up -d
+# 启动所有服务（在项目根目录执行）
+docker compose -f docker/docker-compose.yml up -d
 
 # 查看日志
-docker-compose logs -f
+docker compose -f docker/docker-compose.yml logs -f
 
 # 停止服务
-docker-compose down
+docker compose -f docker/docker-compose.yml down
 ```
 
 #### 开发环境
 
 ```bash
 # 启动开发环境
-docker-compose -f docker-compose.dev.yml up -d
+docker compose -f docker/docker-compose.dev.yml up -d
 
 # 查看日志
-docker-compose -f docker-compose.dev.yml logs -f
+docker compose -f docker/docker-compose.dev.yml logs -f
 
 # 停止服务
-docker-compose -f docker-compose.dev.yml down
+docker compose -f docker/docker-compose.dev.yml down
 ```
 
 ## 📦 服务说明

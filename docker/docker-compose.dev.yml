@@ -24,8 +24,8 @@ services:
   # xRelay 应用（开发模式）
   app:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: xrelay-app-dev
     environment:
       NODE_ENV: development
@@ -37,8 +37,8 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - ./api:/app/api
-      - ./src:/app/src
+      - ../api:/app/api
+      - ../src:/app/src
     networks:
       - xrelay-network
     restart: unless-stopped

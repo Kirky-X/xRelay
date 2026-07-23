@@ -1,0 +1,72 @@
+# Dependencies (rebuilt by npm ci)
+node_modules/
+
+# Build output
+dist/
+build/
+dist-binary/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# VCS
+.git/
+.gitignore
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Tools & caches
+.trae/
+.iflow/
+.openspec/
+.vercel/
+.gitnexus
+.worktrees/
+
+# Security tool binaries (downloaded by tiangang skill)
+bin/
+
+# Tests & coverage
+coverage/
+temp/
+
+# Docker (avoid recursion)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Docker subdir (compose files already excluded above; keep dockerfile templates)
+docker/Dockerfile
+
+# Docs (not needed at runtime)
+README.md
+README_EN.md
+ARCHITECTURE.md
+DEPLOYMENT.md
+AGENTS.md
+IFLOW.md
+LOCAL_DEV.md
+DOCKER.md
+LICENSE
+
+# Vercel config (not needed in Docker image)
+vercel.json
+
+# Tests source (not needed at runtime)
+tests/
+vitest.config.ts
