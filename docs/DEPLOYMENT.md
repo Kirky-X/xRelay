@@ -51,15 +51,38 @@ NODE_ENV=production
 
 ## 🐳 Docker 部署
 
-### 1. 构建镜像
+### 前置准备
+
+Docker Compose 需要 `.env` 文件设置以下必需变量：
 
 ```bash
-docker build -f docker/Dockerfile -t xrelay-app .
+# 从模板创建
+cp .env.example .env
+
+# 编辑 .env，设置强密码（>= 32 字符）
+# POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEYS
 ```
 
-### 2. 运行容器
+### 1. 使用 Docker Compose（推荐）
 
 ```bash
+# 启动所有服务（docker/ 子目录）
+docker compose -f docker/docker-compose.yml --env-file .env up -d
+
+# 查看日志
+docker compose -f docker/docker-compose.yml logs -f
+
+# 停止服务
+docker compose -f docker/docker-compose.yml down
+```
+
+### 2. 手动构建与运行
+
+```bash
+# 构建镜像
+docker build -f docker/Dockerfile -t xrelay-app .
+
+# 运行容器
 docker run -d \
   --name xrelay-app \
   -p 3000:3000 \
@@ -67,20 +90,7 @@ docker run -d \
   xrelay-app
 ```
 
-### 3. 使用 Docker Compose
-
-```bash
-# 启动所有服务
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f
-
-# 停止服务
-docker-compose down
-```
-
-详见 [DOCKER.md](./DOCKER.md)
+详见 [docker/DOCKER.md](../docker/DOCKER.md) 或 [docs/DOCKER.md](./DOCKER.md)
 
 ## 🔧 配置说明
 

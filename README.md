@@ -1,5 +1,5 @@
 <div align="center">
-<img src="public/xRelay.png" alt="xRelay Logo" width="180" />
+<img src="docs/asset/xRelay.png" alt="xRelay Logo" high="180" />
 
 # xRelay
 
@@ -28,6 +28,7 @@
 - **🏥 健康检查** - 提供服务健康状态端点
 - **🔑 API Key 认证** - 支持 API Key 验证
 - **🔒 安全防护** - DNS 重绑定防护、安全响应头
+- **📦 独立部署** - 支持 Bun 二进制与 Docker 部署
 
 ## 使用方法
 
@@ -49,6 +50,7 @@
 | ENABLE_CACHE | 否 | 启用响应缓存 | true |
 | ENABLE_RATE_LIMIT | 否 | 启用请求限流 | true |
 | ENABLE_FALLBACK | 否 | 启用 Fallback 直连 | true |
+| CRON_SECRET | 否 | Cron 端点认证密钥（生产环境建议设置） | - |
 
 ### 使用示例
 
@@ -139,17 +141,15 @@ console.log(result);
   "duration": 1500,
   "cached": false,
   "requestId": "abc123",
-  "rateLimit": {
-    "global": { "allowed": true, "remaining": 99, "resetAt": 1234567890 },
-    "ip": { "allowed": true, "remaining": 4, "resetAt": 1234567890 }
-  }
+  "data": "响应内容"
 }
 ```
 
 | 字段 | 说明 |
 |------|------|
 | success | 请求是否成功 |
-| body | 响应内容 |
+| body | 响应内容（ProxyService 路径） |
+| data | 响应内容（request-handler 路径） |
 | status | HTTP 状态码 |
 | statusText | HTTP 状态文本 |
 | headers | 响应头 |
@@ -160,7 +160,8 @@ console.log(result);
 | duration | 请求耗时（毫秒）|
 | cached | 是否命中缓存 |
 | requestId | 请求 ID |
-| rateLimit | 限流信息 |
+
+> **限流信息**通过响应头返回：`X-RateLimit-Limit`、`X-RateLimit-Remaining`、`X-RateLimit-Reset`
 
 ### 网页捕获 POST /api/capture
 
@@ -233,8 +234,8 @@ console.log(result);
 - **代理请求超时**: 8 秒
 - **直连请求超时**: 10 秒
 - **缓存时间**: 5 分钟
-- **全局限流**: 每分钟 100 次
-- **IP 限流**: 每分钟 5 次
+- **全局限流**: 每分钟 100 次（无效 IP 限流 10 次）
+- **IP 限流**: 每分钟 5 次（无效 IP 限流 0 次）
 - **每次请求选取代理数**: 5 个
 
 ### 数据库配置（可选）
@@ -286,7 +287,8 @@ x-api-key: your-api-key
 ```
 xRelay/
 ├── api/                       # Vercel Edge Functions
-│   └── index.ts              # Edge Function 入口（薄入口层）
+│   ├── index.ts              # Edge Function 入口（IO 适配层）
+│   └── cron/                 # Cron 端点
 ├── src/                       # 核心模块
 │   ├── core/                 # 核心业务逻辑
 │   │   ├── proxy/            # 代理模式
@@ -294,61 +296,93 @@ xRelay/
 │   │   │   ├── database-mode.ts
 │   │   │   ├── circuit-breaker.ts
 │   │   │   └── types.ts
-│   │   └── proxy-service.ts  # 代理服务
-│   ├── middleware/          # 中间件
-│   │   ├── rate-limit.ts     # 限流
-│   │   ├── auth.ts           # 认证
-│   │   ├── cors.ts          # CORS
-│   │   ├── api-key.ts       # API Key 验证
-│   │   ├── body-parser.ts   # 请求体解析
-│   │   ├── compose.ts       # 中间件组合
-│   │   └── validator.ts     # 参数验证
-│   ├── security/            # 安全模块
+│   │   ├── proxy-service.ts  # 代理服务（含缓存集成）
+│   │   └── index.ts
+│   ├── server/               # 跨运行时共享处理器
+│   │   └── handlers.ts       # 路由分发与请求处理
+│   ├── middleware/           # 中间件
+│   │   ├── rate-limit.ts     # 限流（内存滑动窗口）
+│   │   ├── auth.ts           # API Key 验证
+│   │   └── types.ts          # 中间件类型定义
+│   ├── security/             # 安全模块
 │   │   ├── index.ts
-│   │   ├── url-validator.ts # URL 验证
+│   │   ├── url-validator.ts  # URL 验证
 │   │   └── request-validator.ts
-│   ├── database/            # 数据库模块
-│   │   ├── connection.ts    # 数据库连接
+│   ├── security.ts           # SSRF 防护（DNS 验证、IP 黑白名单）
+│   ├── database/             # 数据库模块
+│   │   ├── connection.ts     # 数据库连接
 │   │   ├── available-proxies-dao.ts
 │   │   ├── deprecated-proxies-dao.ts
-│   │   └── cleanup.ts       # 自动清理
-│   ├── cache/               # 缓存模块
-│   │   ├── index.ts
-│   │   ├── advanced-cache.ts
-│   │   └── types.ts
-│   ├── webpage-capture/     # 网页捕获模块
+│   │   ├── cleanup.ts        # 自动清理
+│   │   ├── schema.sql
+│   │   └── index.ts
+│   ├── cache/                # 缓存模块
+│   │   └── advanced-cache.ts # LRU 内存缓存
+│   ├── webpage-capture/      # 网页捕获模块
 │   │   ├── capture-service.ts
 │   │   ├── browser-pool.ts
 │   │   ├── article-extractor.ts
-│   │   └── types.ts
-│   ├── proxy-fetcher.ts     # 代理获取
-│   ├── proxy-tester.ts      # 代理测试
-│   ├── proxy-manager.ts     # 代理池管理
-│   ├── request-handler.ts   # 请求转发
-│   ├── rate-limiter.ts      # 请求限流
-│   ├── config.ts            # 配置管理
-│   ├── logger.ts            # 日志
-│   └── types/               # 类型定义
-├── frontend/                 # 前端源码 (Vue)
-├── tests/                    # 测试文件
-│   ├── unit/                # 单元测试
-│   ├── middleware/          # 中间件测试
-│   └── __mocks__/           # Mock 文件
-├── docker/                   # Docker 配置
+│   │   ├── resource-processor.ts
+│   │   ├── stealth-scripts.ts
+│   │   ├── config.ts
+│   │   ├── types.ts
+│   │   └── index.ts
+│   ├── errors/               # 统一错误处理
+│   │   └── index.ts
+│   ├── utils/                # 工具函数
+│   │   ├── crypto.ts
+│   │   ├── headers.ts
+│   │   ├── proxy.ts
+│   │   └── user-agent.ts
+│   ├── shared/               # 共享组件
+│   │   └── error-handler.ts
+│   ├── proxy-fetcher.ts      # 代理获取
+│   ├── proxy-tester.ts       # 代理测试
+│   ├── proxy-manager.ts      # 代理池管理
+│   ├── request-handler.ts    # 请求转发与 Fallback
+│   ├── config.ts             # 配置管理
+│   ├── logger.ts             # 日志
+│   ├── kv-client.ts          # KV 存储客户端
+│   ├── standalone.ts         # Bun 独立服务器入口
+│   ├── index.ts              # Edge Runtime 轻量入口
+│   └── types/                # 类型定义
+│       └── index.ts
+├── frontend/                  # 前端源码 (Vue 3)
+│   ├── App.vue
+│   ├── main.ts
+│   ├── style.css
+│   └── components/
+├── tests/                     # 测试文件
+│   ├── unit/
+│   ├── core/
+│   ├── middleware/
+│   ├── database/
+│   ├── server/
+│   ├── utils/
+│   ├── e2e/
+│   ├── __mocks__/
+│   ├── setup.ts
+│   └── vitest.config.ts
+├── docker/                    # Docker 配置
 │   ├── Dockerfile
 │   ├── docker-compose.yml
-│   └── docker-compose.dev.yml
-├── docs/                     # 项目文档
+│   ├── docker-compose.dev.yml
+│   ├── docker-test.sh
+│   └── DOCKER.md
+├── docs/                      # 项目文档
 │   ├── ARCHITECTURE.md
 │   ├── DEPLOYMENT.md
 │   └── DOCKER.md
-├── public/                   # 静态资源
-├── scripts/                  # 脚本文件
-├── config/                   # 配置文件
+├── scripts/                   # 构建与部署脚本
+│   ├── build-binary.sh
+│   ├── ci-check.sh
+│   └── deployment-test.sh
+├── config/                    # 构建配置
+│   ├── tsconfig.json
+│   └── vite.config.ts
 ├── package.json
-├── tsconfig.json
-├── vite.config.ts
-└── server.js
+├── server.js                  # Node.js 本地开发服务器
+└── vercel.json
 ```
 
 ## 代理来源

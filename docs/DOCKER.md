@@ -2,21 +2,47 @@
 
 本文档提供使用 Docker 部署 xRelay 的指南。
 
+> ⚠️ **注意**: Docker 配置文件与文档统一位于 `docker/` 子目录。所有命令需在**项目根目录**执行。
+
 ## 📋 前置要求
 
 - Docker 20.10+
 - Docker Compose 2.0+
 
+## 📝 环境变量准备
+
+Docker Compose 使用 `.env` 文件中的以下必需变量：
+
+```bash
+# 生产环境务必使用强密码（>= 32 字符随机串）
+POSTGRES_USER=xrelay
+POSTGRES_PASSWORD=CHANGE_ME_REQUIRED_strong_random_secret_min_32_chars
+POSTGRES_DB=xrelay
+REDIS_PASSWORD=CHANGE_ME_REQUIRED_another_strong_random_secret_min_32_chars
+
+# API Key（生产环境必需）
+ENABLE_API_KEY=true
+API_KEYS=your-secret-api-key-here
+```
+
+创建 `.env` 文件：
+```bash
+cp .env.example .env
+# 然后编辑 .env 文件，设置强密码
+```
+
 ## 🚀 快速开始
 
 ### 方式 1：使用测试脚本（推荐）
 
+所有 compose 文件位于 `docker/` 子目录，脚本也在同一目录：
+
 ```bash
 # 给脚本添加执行权限
-chmod +x docker-test.sh
+chmod +x docker/docker-test.sh
 
 # 运行测试脚本
-./docker-test.sh
+./docker/docker-test.sh
 ```
 
 测试脚本提供以下功能：
@@ -31,30 +57,32 @@ chmod +x docker-test.sh
 
 ### 方式 2：手动启动
 
+所有命令在**项目根目录**执行：
+
 #### 生产环境
 
 ```bash
 # 启动所有服务
-docker-compose up -d
+docker compose -f docker/docker-compose.yml up -d
 
 # 查看日志
-docker-compose logs -f
+docker compose -f docker/docker-compose.yml logs -f
 
 # 停止服务
-docker-compose down
+docker compose -f docker/docker-compose.yml down
 ```
 
 #### 开发环境
 
 ```bash
 # 启动开发环境
-docker-compose -f docker-compose.dev.yml up -d
+docker compose -f docker/docker-compose.dev.yml up -d
 
 # 查看日志
-docker-compose -f docker-compose.dev.yml logs -f
+docker compose -f docker/docker-compose.dev.yml logs -f
 
 # 停止服务
-docker-compose -f docker-compose.dev.yml down
+docker compose -f docker/docker-compose.dev.yml down
 ```
 
 ## 📦 服务说明
@@ -85,7 +113,7 @@ docker-compose -f docker-compose.dev.yml down
 
 ### 修改数据库密码
 
-编辑 `docker-compose.yml` 或 `docker-compose.dev.yml`：
+编辑 `docker/docker-compose.yml` 或 `docker/docker-compose.dev.yml`：
 
 ```yaml
 postgres:
@@ -105,7 +133,7 @@ app:
 
 ### 修改端口
 
-编辑 `docker-compose.yml`：
+编辑 `docker/docker-compose.yml`：
 
 ```yaml
 services:
@@ -128,10 +156,10 @@ services:
 
 ```bash
 # 使用测试脚本
-./docker-test.sh
+./docker/docker-test.sh
 # 选择 "8) 测试 API"
 
-# 或手动测试
+# 或手动测试（确保 Docker 已映射端口）
 curl -X POST http://localhost:3000/api \
   -H "Content-Type: application/json" \
   -d '{
@@ -144,7 +172,7 @@ curl -X POST http://localhost:3000/api \
 
 ```bash
 # 使用测试脚本
-./docker-test.sh
+./docker/docker-test.sh
 # 选择 "7) 进入 PostgreSQL 容器"
 
 # 或手动进入
@@ -187,12 +215,12 @@ docker stats
 
 ```bash
 # 查看所有服务日志
-docker-compose logs -f
+docker compose -f docker/docker-compose.yml logs -f
 
 # 查看特定服务日志
-docker-compose logs -f app
-docker-compose logs -f postgres
-docker-compose logs -f redis
+docker compose -f docker/docker-compose.yml logs -f app
+docker compose -f docker/docker-compose.yml logs -f postgres
+docker compose -f docker/docker-compose.yml logs -f redis
 ```
 
 ## 🧹 清理
@@ -200,19 +228,19 @@ docker-compose logs -f redis
 ### 停止并删除容器
 
 ```bash
-docker-compose down
+docker compose -f docker/docker-compose.yml down
 ```
 
 ### 停止并删除容器和数据卷
 
 ```bash
-docker-compose down -v
+docker compose -f docker/docker-compose.yml down -v
 ```
 
 ### 完全清理（包括镜像）
 
 ```bash
-docker-compose down -v --rmi all
+docker compose -f docker/docker-compose.yml down -v --rmi all
 ```
 
 ## 🔍 故障排查
@@ -221,7 +249,7 @@ docker-compose down -v --rmi all
 
 ```bash
 # 查看容器日志
-docker-compose logs app
+docker compose -f docker/docker-compose.yml logs app
 
 # 检查容器状态
 docker ps -a
@@ -231,10 +259,10 @@ docker ps -a
 
 ```bash
 # 检查 PostgreSQL 是否健康
-docker-compose ps postgres
+docker compose -f docker/docker-compose.yml ps postgres
 
 # 查看 PostgreSQL 日志
-docker-compose logs postgres
+docker compose -f docker/docker-compose.yml logs postgres
 
 # 测试数据库连接
 docker exec -it xrelay-postgres psql -U xrelay -d xrelay
@@ -242,7 +270,7 @@ docker exec -it xrelay-postgres psql -U xrelay -d xrelay
 
 ### 端口冲突
 
-如果端口已被占用，修改 `docker-compose.yml` 中的端口映射：
+如果端口已被占用，修改 `docker/docker-compose.yml` 中的端口映射：
 
 ```yaml
 ports:
@@ -263,13 +291,13 @@ ports:
 
 ### Redis 配置（可选）
 
-如果需要使用 Redis 进行缓存和限流：
+如果需要使用 Redis 进行缓存和限流（需先设置 `REDIS_PASSWORD` 环境变量）：
 
 ```yaml
 app:
   environment:
     KV_REST_API_URL: "redis://redis:6379"
-    KV_REST_API_TOKEN: ""
+    KV_REST_API_TOKEN: "${REDIS_PASSWORD}"
 ```
 
 ## 🚀 生产部署建议
@@ -277,15 +305,12 @@ app:
 1. **使用环境变量文件**
 
 ```bash
-# 创建 .env 文件
-cat > .env << EOF
-DATABASE_URL=postgresql://user:password@host:5432/xrelay
-ENABLE_API_KEY=true
-API_KEYS=your-secret-key
-EOF
+# 从模板创建 .env 文件
+cp .env.example .env
+# 编辑 .env 文件设置强密码和 API Key
 
 # 使用 .env 文件启动
-docker-compose --env-file .env up -d
+docker compose -f docker/docker-compose.yml --env-file .env up -d
 ```
 
 2. **配置资源限制**
@@ -309,7 +334,7 @@ services:
 services:
   app:
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -325,7 +350,7 @@ app:
     DATABASE_URL: postgresql://user:password@external-host:5432/xrelay
 ```
 
-然后从 `docker-compose.yml` 中移除 `postgres` 服务。
+然后从 `docker/docker-compose.yml` 中移除 `postgres` 服务。
 
 ## 📚 相关文档
 

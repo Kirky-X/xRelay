@@ -47,16 +47,20 @@ export const DATABASE_CONFIG = {
   },
 };
 
-// 限流配置
+// 限流配置（按端点隔离）
+// 注意：实际限流实现在 middleware/rate-limit.ts 中
+// 此处配置作为文档参考，运行时使用 rate-limit.ts 中的硬编码值
 export const RATE_LIMIT_CONFIG = {
-  global: {
+  proxy: {
     windowMs: 60 * 1000, // 1分钟
-    maxRequests: 10,
+    maxRequests: 100,
   },
-  ip: {
+  capture: {
     windowMs: 60 * 1000, // 1分钟
-    maxRequests: 5,
+    maxRequests: 30,
   },
+  // 未知/无效 IP 使用更严格限制（1/10）
+  unknownIpDivisor: 10,
 };
 
 // 缓存配置

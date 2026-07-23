@@ -137,14 +137,12 @@ graph TB
 
 ### 1️⃣ Edge Function Entry (`api/index.ts`)
 
-The entry point for all requests. It runs on Vercel's Edge Runtime, ensuring low latency and high availability.
+Vercel IO 适配层，将 `VercelRequest/VercelResponse` 适配到共享核心处理器 `dispatchRequest`。实际的业务逻辑（路由、限流、认证、代理执行）统一位于 `src/server/handlers.ts`。
 
 - **Responsibilities**:
-  - Request parsing and validation
-  - API Key authentication
-  - Rate limiting checks
-  - Response formatting
-  - Error handling
+  - 构造运行时中立的 `RequestContext`
+  - 调用 `dispatchRequest` 处理业务
+  - 将 `ResponseSpec` 应用到 `VercelResponse`
 
 ### 2️⃣ Database Layer (`src/database/`)
 
@@ -160,9 +158,11 @@ Manages proxy data persistence and state across multiple deployment instances.
 
 Provides response caching to reduce redundant requests and improve performance.
 
-- **Storage**: In-memory cache (default) or Redis/Vercel KV
-- **TTL**: 5 minutes (configurable)
-- **Strategy**: Cache-aside pattern
+- **Storage**: In-memory LRU cache (`advanced-cache.ts`)
+- **TTL**: 5 minutes (configurable via `CACHE_CONFIG.ttl`)
+- **Max Size**: 100 entries (configurable via `CACHE_CONFIG.maxSize`)
+- **Strategy**: Cache-aside pattern (仅缓存 GET 请求)
+- **Note**: 仅对成功响应的 GET 请求写缓存。单实例缓存，跨实例场景需通过 Vercel KV 或 Redis 实现。
 
 ### 4️⃣ Proxy Service (`src/core/proxy-service.ts`)
 
@@ -191,15 +191,12 @@ Ensures high success rates.
 
 ### 7️⃣ Middleware Layer (`src/middleware/`)
 
-Provides request processing pipeline.
+Provides request processing pipeline.实际的路由分发、CORS、认证在 `src/server/handlers.ts` 中统一处理。
 
 - **Components**:
-  - `rate-limit.ts`: Rate limiting (global and per-IP)
-  - `auth.ts`: Authentication
-  - `cors.ts`: CORS handling
-  - `api-key.ts`: API Key validation
-  - `body-parser.ts`: Request body parsing
-  - `compose.ts`: Middleware composition
+  - `rate-limit.ts`: 限流（内存滑动窗口，按端点/IP 隔离）
+  - `auth.ts`: API Key 验证（支持 VercelRequest 与标准 Headers）
+  - `types.ts`: 中间件类型定义
 
 ### 8️⃣ Webpage Capture (`src/webpage-capture/`)
 
@@ -208,6 +205,8 @@ Provides webpage capture capabilities.
 - **Modes**: HTML, Screenshot, Article extraction
 - **Browser Pool**: Manages browser instances for rendering
 - **Article Extractor**: Extracts clean article content from webpages
+- **Resource Processor**: Processes and inlines resources (CSS, images)
+- **Stealth Scripts**: Anti-detection scripts for headless browser
 
 ---
 
