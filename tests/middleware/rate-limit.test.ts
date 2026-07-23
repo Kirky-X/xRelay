@@ -4,502 +4,157 @@
  */
 
 /**
- * Rate Limit Middleware Tests - 速率限制中间件测试
- * 测试全局限流、IP限流、配置选项等功能
+ * Rate Limit 测试 - 验证内存限流的核心行为
+ *
+ * 测试目标：src/middleware/rate-limit.ts 的 checkRateLimit / getClientIpFromRequest
+ *
+ * 设计说明：
+ * - rateLimitStore / captureRateLimitStore 为模块私有状态，
+ *   每个用例使用唯一 IP（基于用例序号）以隔离相互影响
+ * - 顶部 mock 默认开启限流；用例内 doMock + 动态 import 用于覆盖 enableRateLimit=false
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { rateLimitMiddleware } from '../../src/middleware/rate-limit.js';
-import type { MiddlewareContext } from '../../src/middleware/types.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock rate-limiter 模块
-vi.mock('../../src/rate-limiter.js', () => ({
-  checkGlobalRateLimit: vi.fn(),
-  checkIpRateLimit: vi.fn(),
+// 可变的 FEATURES 引用（用例内可翻转 enableRateLimit）
+const { featuresRef } = vi.hoisted(() => ({
+  featuresRef: { enableRateLimit: true },
 }));
 
-import { checkGlobalRateLimit, checkIpRateLimit } from '../../src/rate-limiter.js';
+vi.mock("../../src/config.js", () => ({
+  FEATURES: featuresRef,
+  CORS_CONFIG: { allowedOrigins: [] },
+  RATE_LIMIT_CONFIG: {
+    global: { maxRequests: 100, windowMs: 60000 },
+    ip: { maxRequests: 100, windowMs: 60000 },
+  },
+}));
 
-const mockCheckGlobalRateLimit = vi.mocked(checkGlobalRateLimit);
-const mockCheckIpRateLimit = vi.mocked(checkIpRateLimit);
+import { checkRateLimit, getClientIpFromRequest } from "../../src/middleware/rate-limit.js";
 
-/**
- * 创建模拟的中间件上下文
- */
-function createMockContext(overrides: Partial<MiddlewareContext> = {}): MiddlewareContext {
-  return {
-    request: new Request('http://test.com'),
-    clientIp: '127.0.0.1',
-    startTime: Date.now(),
-    state: {},
-    ...overrides,
-  };
+// 唯一 IP 生成器：使用 203.0.113.0/24 与 198.51.100.0/24 两个 TEST-NET 网段循环
+// （RFC 5737 文档示例网段，不会与真实公网冲突，且格式合法不会被降级）
+let caseSeq = 0;
+function uniqueIp(): string {
+  caseSeq += 1;
+  const n = caseSeq;
+  if (n <= 250) return `203.0.113.${n}`;
+  return `198.51.100.${n - 250}`;
 }
 
-describe('Rate Limit Middleware', () => {
+describe("checkRateLimit - 内存限流", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   afterEach(() => {
-    vi.resetAllMocks();
+    vi.restoreAllMocks();
   });
 
-  describe('基本功能', () => {
-    it('应该在禁用时直接通过', async () => {
-      const context = createMockContext();
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: false,
-        enableGlobalLimit: true,
-        enableIpLimit: true,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(true);
-      expect(context.response).toBeUndefined();
-      expect(mockCheckGlobalRateLimit).not.toHaveBeenCalled();
-      expect(mockCheckIpRateLimit).not.toHaveBeenCalled();
-    });
-
-    it('应该在启用时检查限流', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 99,
-        resetIn: 60000,
-      });
-      mockCheckIpRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 99,
-        resetIn: 60000,
-      });
-
-      const context = createMockContext();
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: true,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(true);
-      expect(mockCheckGlobalRateLimit).toHaveBeenCalled();
-      expect(mockCheckIpRateLimit).toHaveBeenCalledWith('127.0.0.1');
-    });
+  it("首次请求应放行并扣减剩余配额", () => {
+    const r = checkRateLimit(uniqueIp());
+    expect(r.allowed).toBe(true);
+    expect(r.remaining).toBe(99);
+    expect(r.resetAt).toBeGreaterThan(Date.now());
   });
 
-  describe('全局限流', () => {
-    it('应该在全局限流通过时继续', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 50,
-        resetIn: 30000,
-      });
-
-      const context = createMockContext();
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: false,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(true);
-      expect(context.response).toBeUndefined();
-    });
-
-    it('应该在全局限流触发时拒绝请求', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetIn: 45000,
-      });
-
-      const context = createMockContext();
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: false,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(false);
-      expect(context.response?.status).toBe(429);
-    });
-
-    it('应该返回正确的全局限流错误响应', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetIn: 45000,
-      });
-
-      const context = createMockContext();
-
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: false,
-      });
-
-      await middleware(context, async () => {});
-
-      expect(context.response?.status).toBe(429);
-      expect(context.response?.headers.get('Content-Type')).toBe('application/json');
-
-      const body = await context.response?.json();
-      expect(body).toEqual({
-        error: 'Rate limit exceeded. Please try again later.',
-        code: 'RATE_LIMIT_GLOBAL',
-        retryAfter: 45, // Math.ceil(45000 / 1000)
-      });
-    });
-
-    it('应该在全局限流禁用时不检查', async () => {
-      const context = createMockContext();
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: false,
-        enableIpLimit: false,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(true);
-      expect(mockCheckGlobalRateLimit).not.toHaveBeenCalled();
-    });
+  it("达到上限后应拒绝", () => {
+    const ip = uniqueIp();
+    for (let i = 0; i < 100; i++) {
+      const r = checkRateLimit(ip);
+      expect(r.allowed).toBe(true);
+    }
+    const over = checkRateLimit(ip);
+    expect(over.allowed).toBe(false);
+    expect(over.remaining).toBe(0);
   });
 
-  describe('IP 限流', () => {
-    it('应该在 IP 限流通过时继续', async () => {
-      mockCheckIpRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 20,
-        resetIn: 15000,
-      });
-
-      const context = createMockContext({ clientIp: '192.168.1.100' });
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: false,
-        enableIpLimit: true,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(true);
-      expect(mockCheckIpRateLimit).toHaveBeenCalledWith('192.168.1.100');
-    });
-
-    it('应该在 IP 限流触发时拒绝请求', async () => {
-      mockCheckIpRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetIn: 30000,
-      });
-
-      const context = createMockContext({ clientIp: '192.168.1.100' });
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: false,
-        enableIpLimit: true,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(false);
-      expect(context.response?.status).toBe(429);
-    });
-
-    it('应该返回正确的 IP 限流错误响应', async () => {
-      mockCheckIpRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetIn: 30000,
-      });
-
-      const context = createMockContext();
-
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: false,
-        enableIpLimit: true,
-      });
-
-      await middleware(context, async () => {});
-
-      expect(context.response?.status).toBe(429);
-      expect(context.response?.headers.get('Content-Type')).toBe('application/json');
-
-      const body = await context.response?.json();
-      expect(body).toEqual({
-        error: 'Rate limit exceeded for your IP.',
-        code: 'RATE_LIMIT_IP',
-        retryAfter: 30, // Math.ceil(30000 / 1000)
-      });
-    });
-
-    it('应该正确处理不同的 IP 地址', async () => {
-      const ips = ['192.168.1.1', '10.0.0.1', '172.16.0.1'];
-
-      for (const ip of ips) {
-        mockCheckIpRateLimit.mockResolvedValue({
-          allowed: true,
-          remaining: 10,
-          resetIn: 10000,
-        });
-
-        const context = createMockContext({ clientIp: ip });
-
-        let nextCalled = false;
-        const middleware = rateLimitMiddleware({
-          enabled: true,
-          enableGlobalLimit: false,
-          enableIpLimit: true,
-        });
-
-        await middleware(context, async () => {
-          nextCalled = true;
-        });
-
-        expect(nextCalled).toBe(true);
-        expect(mockCheckIpRateLimit).toHaveBeenCalledWith(ip);
-        vi.clearAllMocks();
-      }
-    });
+  it("capture 端点应使用更严格配额 (30)", () => {
+    const ip = uniqueIp();
+    for (let i = 0; i < 30; i++) {
+      expect(checkRateLimit(ip, "capture").allowed).toBe(true);
+    }
+    expect(checkRateLimit(ip, "capture").allowed).toBe(false);
   });
 
-  describe('组合限流', () => {
-    it('应该同时检查全局和 IP 限流', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 50,
-        resetIn: 30000,
-      });
-      mockCheckIpRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 10,
-        resetIn: 15000,
-      });
-
-      const context = createMockContext();
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: true,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(true);
-      expect(mockCheckGlobalRateLimit).toHaveBeenCalled();
-      expect(mockCheckIpRateLimit).toHaveBeenCalled();
-    });
-
-    it('应该在全局限流触发时跳过 IP 限流检查', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetIn: 30000,
-      });
-
-      const context = createMockContext();
-
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: true,
-      });
-
-      await middleware(context, async () => {});
-
-      expect(mockCheckGlobalRateLimit).toHaveBeenCalled();
-      expect(mockCheckIpRateLimit).not.toHaveBeenCalled();
-    });
-
-    it('应该在全局通过但 IP 限流触发时拒绝请求', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 50,
-        resetIn: 30000,
-      });
-      mockCheckIpRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetIn: 15000,
-      });
-
-      const context = createMockContext();
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: true,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(false);
-      expect(context.response?.status).toBe(429);
-
-      const body = await context.response?.json();
-      expect(body.code).toBe('RATE_LIMIT_IP');
-    });
+  it("default 与 capture 端点的计数应相互独立", () => {
+    const ip = uniqueIp();
+    for (let i = 0; i < 100; i++) checkRateLimit(ip); // default 满
+    expect(checkRateLimit(ip).allowed).toBe(false);
+    expect(checkRateLimit(ip, "capture").allowed).toBe(true); // capture 仍可用
   });
 
-  describe('边界情况', () => {
-    it('应该正确处理 resetIn 为 0 的情况', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetIn: 0,
-      });
-
-      const context = createMockContext();
-
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: false,
-      });
-
-      await middleware(context, async () => {});
-
-      const body = await context.response?.json();
-      expect(body.retryAfter).toBe(0);
-    });
-
-    it('应该正确处理小数 resetIn', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetIn: 15500,
-      });
-
-      const context = createMockContext();
-
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: false,
-      });
-
-      await middleware(context, async () => {});
-
-      const body = await context.response?.json();
-      expect(body.retryAfter).toBe(16); // Math.ceil(15500 / 1000)
-    });
-
-    it('应该正确处理 IPv6 地址', async () => {
-      mockCheckIpRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 10,
-        resetIn: 10000,
-      });
-
-      const context = createMockContext({
-        clientIp: '2001:0db8:85a3:0000:0000:8a2e:0370:7334',
-      });
-
-      let nextCalled = false;
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: false,
-        enableIpLimit: true,
-      });
-
-      await middleware(context, async () => {
-        nextCalled = true;
-      });
-
-      expect(nextCalled).toBe(true);
-      expect(mockCheckIpRateLimit).toHaveBeenCalledWith('2001:0db8:85a3:0000:0000:8a2e:0370:7334');
-    });
+  it("无效 IP 应被降级为 1/10 配额", () => {
+    const invalid = `invalid-${caseSeq++}`;
+    const limit = Math.floor(100 / 10);
+    for (let i = 0; i < limit; i++) {
+      expect(checkRateLimit(invalid).allowed).toBe(true);
+    }
+    expect(checkRateLimit(invalid).allowed).toBe(false);
   });
 
-  describe('中间件链行为', () => {
-    it('应该在限流通过时继续中间件链', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: true,
-        remaining: 50,
-        resetIn: 30000,
-      });
+  it("'unknown' IP 同样被降级", () => {
+    // 'unknown' 是固定字符串，跨用例会累积；本用例只验证首次进入即被识别为降级路径
+    // 之前的 IP 测试用了 unknown，这里用一个新的子串避免累积影响断言
+    // 实际策略：unknown 是固定值，多个用例间会累积，但我们只断言 remaining 被降级
+    const r = checkRateLimit("unknown");
+    expect(r.allowed).toBe(true);
+    // 降级配额 = floor(100/10) = 10；首次进入后剩余 9
+    expect(r.remaining).toBeLessThanOrEqual(9);
+  });
 
-      const context = createMockContext();
-      const nextMiddleware = vi.fn();
+  it("不同 IP 的计数互不影响", () => {
+    const ipA = uniqueIp();
+    const ipB = uniqueIp();
+    for (let i = 0; i < 50; i++) checkRateLimit(ipA);
+    expect(checkRateLimit(ipA).remaining).toBe(49);
+    expect(checkRateLimit(ipB).remaining).toBe(99);
+  });
 
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: false,
-      });
+  it("IPv6 地址应被识别为有效（满配额）", () => {
+    const ip = `2001:db8::${caseSeq++}`;
+    const r = checkRateLimit(ip);
+    expect(r.allowed).toBe(true);
+    expect(r.remaining).toBe(99); // 满配额（非降级）
+  });
 
-      await middleware(context, async () => {
-        nextMiddleware();
-      });
+  it("FEATURES.enableRateLimit=false 时应直接放行不扣减", () => {
+    const prev = featuresRef.enableRateLimit;
+    featuresRef.enableRateLimit = false;
+    try {
+      const r = checkRateLimit(uniqueIp());
+      expect(r.allowed).toBe(true);
+      expect(r.remaining).toBe(100); // 不扣减
+    } finally {
+      featuresRef.enableRateLimit = prev;
+    }
+  });
+});
 
-      expect(nextMiddleware).toHaveBeenCalled();
+describe("getClientIpFromRequest", () => {
+  it("应优先读取 x-forwarded-for 第一个 IP", () => {
+    const req = new Request("http://test", {
+      headers: { "x-forwarded-for": "1.1.1.1, 2.2.2.2" },
     });
+    expect(getClientIpFromRequest(req)).toBe("1.1.1.1");
+  });
 
-    it('应该在限流触发时终止中间件链', async () => {
-      mockCheckGlobalRateLimit.mockResolvedValue({
-        allowed: false,
-        remaining: 0,
-        resetIn: 30000,
-      });
-
-      const context = createMockContext();
-      const nextMiddleware = vi.fn();
-
-      const middleware = rateLimitMiddleware({
-        enabled: true,
-        enableGlobalLimit: true,
-        enableIpLimit: false,
-      });
-
-      await middleware(context, async () => {
-        nextMiddleware();
-      });
-
-      expect(nextMiddleware).not.toHaveBeenCalled();
+  it("无 x-forwarded-for 时回退到 x-real-ip", () => {
+    const req = new Request("http://test", {
+      headers: { "x-real-ip": "3.3.3.3" },
     });
+    expect(getClientIpFromRequest(req)).toBe("3.3.3.3");
+  });
+
+  it("无任何 IP 头时应返回 'unknown'", () => {
+    const req = new Request("http://test");
+    expect(getClientIpFromRequest(req)).toBe("unknown");
+  });
+
+  it("应支持 Cloudflare cf-connecting-ip 头", () => {
+    const req = new Request("http://test", {
+      headers: { "cf-connecting-ip": "4.4.4.4" },
+    });
+    expect(getClientIpFromRequest(req)).toBe("4.4.4.4");
   });
 });

@@ -166,14 +166,23 @@ describe("CaptureService - 浏览器失败降级", () => {
         release: vi.fn(async () => {}),
       });
 
-      const result = await captureWebpage("https://example.com", { mode: "html" });
+      // 用 spy 替换 global.fetch，以断言"未走降级路径"
+      const fetchSpy = vi.fn(async () => new Response("", { status: 200 }));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
 
-      expect(result.success).toBe(true);
-      expect(result.html).toBe("<html><body>rendered</body></html>");
-      expect(result.title).toBe("Rendered Title");
-      expect(result.degraded).toBeUndefined();
-      // 不应调用 fetch
-      expect(global.fetch).not.toHaveBeenCalled();
+      try {
+        const result = await captureWebpage("https://example.com", { mode: "html" });
+
+        expect(result.success).toBe(true);
+        expect(result.html).toBe("<html><body>rendered</body></html>");
+        expect(result.title).toBe("Rendered Title");
+        expect(result.degraded).toBeUndefined();
+        // 浏览器路径成功时不应触发 fetch 降级
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
   });
 });

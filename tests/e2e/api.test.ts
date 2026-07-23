@@ -17,10 +17,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // vi.hoisted 提升 mock 函数，避免 vi.mock 的 TDZ 问题
-const { mockExecute, mockCaptureWebpage } = vi.hoisted(() => ({
+const { mockExecute, mockCaptureWebpage, featuresRef } = vi.hoisted(() => ({
   mockExecute: vi.fn(),
   mockCaptureWebpage: vi.fn(),
+  // FEATURES 引用：用例内可翻转 enableRateLimit/enableApiKey
+  featuresRef: {
+    enableCache: true,
+    enableRateLimit: false, // 默认禁用，避免累积触发 429
+    enableFallback: true,
+    enableApiKey: false,
+  },
 }));
+
+// Mock config：FEATURES 在模块加载时求值，env 变量无法反向更新已加载常量，
+// 必须通过 mock 替换为可变引用，测试才能稳定控制开关
+// 保留其他真实导出（CORS_CONFIG 白名单等），仅覆盖 FEATURES
+vi.mock("../../src/config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/config.js")>();
+  return {
+    ...actual,
+    FEATURES: featuresRef,
+  };
+});
 
 // Mock ProxyService（避免实际发起代理请求）
 vi.mock("../../src/core/proxy-service.js", () => ({
@@ -126,9 +144,10 @@ describe("API 端到端测试", () => {
     mockCaptureWebpage.mockReset();
     vi.mocked(validateDnsResolution).mockReset();
     vi.mocked(validateDnsResolution).mockResolvedValue({ valid: true });
-    // 测试默认禁用 API Key 和限流（已在 setup.ts 设置）
-    process.env.ENABLE_API_KEY = "false";
-    process.env.ENABLE_RATE_LIMIT = "false";
+    // 测试默认禁用 API Key 和限流
+    // 必须同时更新 featuresRef 引用（env 变量无法反向影响已加载的 FEATURES 常量）
+    featuresRef.enableApiKey = false;
+    featuresRef.enableRateLimit = false;
   });
 
   describe("健康检查端点", () => {
