@@ -7,6 +7,9 @@
  * Proxy Tester - 测试代理可用性
  * 快速检测代理是否可用，筛选出可用的代理
  * 支持数据库集成
+ *
+ * 关键约束：所有测试函数必须通过代理（undici.ProxyAgent）发起请求，
+ * 验证响应确实经由代理转发，避免"测试通过但代理未介入"的虚假可用性。
  */
 
 import type { ProxyInfo } from "./types/index.js";
@@ -15,6 +18,9 @@ import { isDatabaseReady } from "./database/connection.js";
 import {
   insertDeprecatedProxy,
 } from "./database/deprecated-proxies-dao.js";
+import { request as undiciRequest, ProxyAgent } from "undici";
+import { logger } from "./logger.js";
+import { getRandomUserAgent } from "./utils/user-agent.js";
 
 // 代理黑名单最大容量
 const MAX_BLACKLIST_SIZE = 1000;
@@ -23,14 +29,153 @@ const MAX_BLACKLIST_SIZE = 1000;
 const failedProxyBlacklist = new Map<string, number>();
 
 /**
- * 测试单个代理
+ * 代理协议 -> undici ProxyAgent 支持的 URI 前缀
+ * undici ProxyAgent 仅支持 http:// 协议（HTTP CONNECT 隧道）
+ * HTTPS 代理和 SOCKS5 代理需要专门的 dispatcher，暂未集成
  */
-export async function testProxy(proxy: ProxyInfo): Promise<{
+function buildProxyUri(proxy: ProxyInfo): string {
+  const protocol = (proxy.protocol ?? "http").toLowerCase();
+  // undici ProxyAgent 走 HTTP CONNECT 隧道，协议始终为 http://
+  // 协议字段用于上层语义区分，不直接拼到 ProxyAgent URI
+  if (protocol !== "http" && protocol !== "https") {
+    logger.debug(
+      `代理协议 ${protocol} 暂未支持，按 http 处理: ${proxy.ip}:${proxy.port}`,
+      { module: "ProxyTester" },
+    );
+  }
+  return `http://${proxy.ip}:${proxy.port}`;
+}
+
+/**
+ * 代理可达性测试结果
+ */
+export interface ProxyTestResult {
   success: boolean;
   proxy: ProxyInfo;
   latency?: number;
+  anonymity?: "anonymous" | "transparent" | "unknown";
+  exitIp?: string;
   error?: string;
+}
+
+/**
+ * 通过代理向测试端点发起请求
+ * 使用 undici ProxyAgent 作为 dispatcher，确保流量经由代理转发
+ *
+ * @param proxy 代理信息
+ * @param timeoutMs 超时时间（毫秒）
+ * @param method HTTP 方法（默认 GET，用于获取 httpbin.org/ip 的 JSON 响应）
+ */
+async function fetchViaProxy(
+  proxy: ProxyInfo,
+  timeoutMs: number,
+  method: "GET" | "HEAD" = "GET",
+): Promise<{
+  ok: boolean;
+  statusCode: number;
+  bodyText: string;
+  latency: number;
 }> {
+  const proxyUri = buildProxyUri(proxy);
+  const dispatcher = new ProxyAgent(proxyUri);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const startTime = Date.now();
+
+  try {
+    const response = await undiciRequest(PROXY_TEST_CONFIG.testUrl, {
+      method,
+      dispatcher,
+      signal: controller.signal,
+      headersTimeout: timeoutMs,
+      bodyTimeout: timeoutMs,
+      maxRedirections: 0,
+      headers: {
+        // 每次请求随机轮换 UA，避免被目标站识别为自动化流量
+        "User-Agent": getRandomUserAgent(),
+        Accept: "application/json",
+      },
+    });
+
+    let bodyText = "";
+    if (response.body) {
+      bodyText = await response.body.text();
+    }
+
+    return {
+      ok: response.statusCode >= 200 && response.statusCode < 400,
+      statusCode: response.statusCode,
+      bodyText,
+      latency: Date.now() - startTime,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+    // 释放底层 socket 池，避免连接泄漏
+    try {
+      await dispatcher.close();
+    } catch {
+      // 关闭失败可忽略，dispatcher 会在 GC 时被回收
+    }
+  }
+}
+
+/**
+ * 解析 httpbin.org/ip 响应，判断代理匿名性
+ * 响应格式：{"origin": "1.2.3.4"} 或 {"origin": "1.2.3.4, 5.6.7.8"}
+ */
+function parseIpResponse(
+  bodyText: string,
+  proxy: ProxyInfo,
+): {
+  anonymity: "anonymous" | "transparent" | "unknown";
+  exitIp?: string;
+} {
+  if (!bodyText) {
+    return { anonymity: "unknown" };
+  }
+
+  let parsed: { origin?: string };
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return { anonymity: "unknown" };
+  }
+
+  if (typeof parsed.origin !== "string" || !parsed.origin.trim()) {
+    return { anonymity: "unknown" };
+  }
+
+  const origins = parsed.origin
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (origins.length === 0) {
+    return { anonymity: "unknown" };
+  }
+
+  const proxyIp = proxy.ip;
+  const firstIp = origins[0];
+
+  // 第一个 IP 是请求方 IP（代理出口 IP）
+  if (firstIp === proxyIp) {
+    return { anonymity: "anonymous", exitIp: firstIp };
+  }
+
+  // 多个 IP 表示透明代理（X-Forwarded-For 链）
+  if (origins.length > 1) {
+    return { anonymity: "transparent", exitIp: firstIp };
+  }
+
+  // 单个 IP 但不等于代理 IP，可能是代理做了 IP 伪装或测试端点异常
+  return { anonymity: "unknown", exitIp: firstIp };
+}
+
+/**
+ * 测试单个代理
+ * 通过代理向 httpbin.org/ip 发起 GET 请求，验证响应状态与匿名性
+ */
+export async function testProxy(proxy: ProxyInfo): Promise<ProxyTestResult> {
   // 检查是否在黑名单中（内存模式）
   if (!isDatabaseReady()) {
     const blacklistKey = `${proxy.ip}:${proxy.port}`;
@@ -44,58 +189,55 @@ export async function testProxy(proxy: ProxyInfo): Promise<{
     }
   }
 
-  const startTime = Date.now();
-
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
+    const result = await fetchViaProxy(
+      proxy,
       PROXY_TEST_CONFIG.testTimeout,
+      "GET",
     );
 
-    const response = await fetch(PROXY_TEST_CONFIG.testUrl, {
-      method: "GET",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Proxy-Connection": "Keep-Alive",
-      },
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    const latency = Date.now() - startTime;
-
-    if (response.ok) {
-      console.log(
-        `[ProxyTester] 代理可用: ${proxy.ip}:*** (延迟: ${latency}ms)`,
-      );
-      return {
-        success: true,
-        proxy,
-        latency,
-      };
-    } else {
+    if (!result.ok) {
       markProxyAsFailed(proxy);
       return {
         success: false,
         proxy,
-        error: `HTTP ${response.status}`,
+        latency: result.latency,
+        error: `HTTP ${result.statusCode}`,
       };
     }
+
+    const { anonymity, exitIp } = parseIpResponse(result.bodyText, proxy);
+
+    logger.info(
+      `代理可用: ${proxy.ip}:${proxy.port} (延迟 ${result.latency}ms, 匿名性: ${anonymity}, 出口: ${exitIp ?? "N/A"})`,
+      { module: "ProxyTester" },
+    );
+
+    return {
+      success: true,
+      proxy,
+      latency: result.latency,
+      anonymity,
+      exitIp,
+    };
   } catch (error) {
     markProxyAsFailed(proxy);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    logger.debug(
+      `代理测试失败: ${proxy.ip}:${proxy.port} (${message})`,
+      { module: "ProxyTester" },
+    );
     return {
       success: false,
       proxy,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: message,
     };
   }
 }
 
 /**
  * 并行测试多个代理，快速筛选可用代理
+ * 限制并发数避免系统资源耗尽；找到足够可用代理时提前结束
  */
 export async function testProxiesInBatch(
   proxies: ProxyInfo[],
@@ -106,11 +248,11 @@ export async function testProxiesInBatch(
     return [];
   }
 
-  console.log(`[ProxyTester] 开始测试 ${proxies.length} 个代理...`);
+  logger.info(`开始批量测试 ${proxies.length} 个代理（并发 ${maxWorkers}）`, {
+    module: "ProxyTester",
+  });
 
-  // 并行测试，但限制并发数
-  // 直接收集带延迟的结果，避免重复测试
-  const results: Array<{ success: boolean; proxy: ProxyInfo; latency?: number }> = [];
+  const successes: Array<{ proxy: ProxyInfo; latency: number }> = [];
 
   for (let i = 0; i < proxies.length; i += maxWorkers) {
     const batch = proxies.slice(i, i + maxWorkers);
@@ -119,48 +261,43 @@ export async function testProxiesInBatch(
     );
 
     for (const result of batchResults) {
-      if (result.success) {
-        results.push({ success: true, proxy: result.proxy, latency: result.latency });
+      if (result.success && typeof result.latency === "number") {
+        successes.push({ proxy: result.proxy, latency: result.latency });
       }
     }
 
-    // 如果已经找到足够的可用代理，提前结束
-    if (results.length >= minSuccessCount) {
-      console.log(
-        `[ProxyTester] 已找到 ${results.length} 个可用代理，提前结束测试`,
+    if (successes.length >= minSuccessCount) {
+      logger.info(
+        `已找到 ${successes.length} 个可用代理，提前结束测试`,
+        { module: "ProxyTester" },
       );
       break;
     }
   }
 
-  // 按延迟排序（最快的在前）- 直接使用已有延迟信息，不重复测试
-  results.sort((a, b) => (a.latency || Infinity) - (b.latency || Infinity));
+  // 按延迟升序排序
+  successes.sort((a, b) => a.latency - b.latency);
 
-  console.log(
-    `[ProxyTester] 测试完成，找到 ${results.length} 个可用代理`,
+  logger.info(
+    `批量测试完成，可用代理 ${successes.length}/${proxies.length}`,
+    { module: "ProxyTester" },
   );
 
-  return results.map((r) => r.proxy);
+  return successes.map((s) => s.proxy);
 }
 
 /**
  * 快速检测代理是否可用（非严格测试）
+ * 仍通过代理发起请求，但仅检查 HTTP 状态，不解析 body
  */
-export async function quickTestProxy(_proxy: ProxyInfo): Promise<boolean> {
+export async function quickTestProxy(proxy: ProxyInfo): Promise<boolean> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
+    const result = await fetchViaProxy(
+      proxy,
       PROXY_TEST_CONFIG.quickTestTimeout,
+      "GET",
     );
-
-    const response = await fetch(PROXY_TEST_CONFIG.testUrl, {
-      method: "HEAD",
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-    return response.ok;
+    return result.ok;
   } catch {
     return false;
   }
@@ -168,71 +305,64 @@ export async function quickTestProxy(_proxy: ProxyInfo): Promise<boolean> {
 
 /**
  * 批量快速测试代理
+ * 全部并行测试，通过测试的代理按原始顺序返回
  */
 export async function quickTestProxies(
   proxies: ProxyInfo[],
   timeoutPerProxy: number = PROXY_TEST_CONFIG.quickTestTimeout,
 ): Promise<ProxyInfo[]> {
-  console.log(`[ProxyTester] 快速测试 ${proxies.length} 个代理...`);
+  if (proxies.length === 0) {
+    return [];
+  }
+
+  logger.info(`快速测试 ${proxies.length} 个代理`, { module: "ProxyTester" });
 
   const results = await Promise.all(
     proxies.map(async (proxy) => {
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeoutPerProxy);
-
-        const response = await fetch(PROXY_TEST_CONFIG.testUrl, {
-          method: "HEAD",
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          return proxy;
-        }
+        const result = await fetchViaProxy(proxy, timeoutPerProxy, "GET");
+        return result.ok ? proxy : null;
       } catch {
-        // 测试失败，忽略
+        return null;
       }
-      return null;
     }),
   );
 
-  const availableProxies = results.filter((p): p is ProxyInfo => p !== null);
-  console.log(`[ProxyTester] 快速测试完成，${availableProxies.length} 个可用`);
+  const availableProxies = results.filter(
+    (p): p is ProxyInfo => p !== null,
+  );
+
+  logger.info(
+    `快速测试完成，可用 ${availableProxies.length}/${proxies.length}`,
+    { module: "ProxyTester" },
+  );
 
   return availableProxies;
 }
 
 /**
  * 检测代理可达性（使用前检测）
+ * 通过代理发起请求，返回可达性与错误信息
  */
-export async function checkProxyReachability(proxy: ProxyInfo): Promise<{
-  reachable: boolean;
-  error?: string;
-}> {
+export async function checkProxyReachability(
+  proxy: ProxyInfo,
+): Promise<{ reachable: boolean; error?: string; latency?: number }> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
+    const result = await fetchViaProxy(
+      proxy,
       PROXY_TEST_CONFIG.quickTestTimeout,
+      "GET",
     );
 
-    const response = await fetch(PROXY_TEST_CONFIG.testUrl, {
-      method: "HEAD",
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      return { reachable: true };
-    } else {
-      return {
-        reachable: false,
-        error: `HTTP ${response.status}`,
-      };
+    if (result.ok) {
+      return { reachable: true, latency: result.latency };
     }
+
+    return {
+      reachable: false,
+      error: `HTTP ${result.statusCode}`,
+      latency: result.latency,
+    };
   } catch (error) {
     return {
       reachable: false,
@@ -269,7 +399,9 @@ function markProxyAsFailed(proxy: ProxyInfo): void {
     );
   }
 
-  console.log(`[ProxyTester] 代理失效: ${proxy.ip}:***，加入黑名单`);
+  logger.debug(`代理失效: ${proxy.ip}:${proxy.port}，加入黑名单`, {
+    module: "ProxyTester",
+  });
 }
 
 /**
@@ -286,8 +418,9 @@ export async function moveUnreachableProxyToDeprecated(
   }
 
   try {
-    console.log(
-      `[ProxyTester] 代理不可达，移入废弃表: ${proxy.ip}:*** (${error || "Unknown error"})`,
+    logger.info(
+      `代理不可达，移入废弃表: ${proxy.ip}:${proxy.port} (${error || "Unknown error"})`,
+      { module: "ProxyTester" },
     );
 
     await insertDeprecatedProxy({
@@ -295,11 +428,15 @@ export async function moveUnreachableProxyToDeprecated(
       port: parseInt(proxy.port, 10),
       source: proxy.source,
       protocol: "http",
-      failure_count: DATABASE_CONFIG.failureThreshold, // 直接设为最大值
+      failure_count: DATABASE_CONFIG.failureThreshold,
       created_at: new Date(proxy.timestamp),
     });
   } catch (err) {
-    console.error("[ProxyTester] 移入废弃表失败:", err);
+    logger.error(
+      "移入废弃表失败",
+      err instanceof Error ? err : undefined,
+      { module: "ProxyTester" },
+    );
   }
 }
 
@@ -313,8 +450,9 @@ export function cleanupBlacklist(): void {
       failedProxyBlacklist.delete(key);
     }
   }
-  console.log(
-    `[ProxyTester] 黑名单清理完成，剩余 ${failedProxyBlacklist.size} 个`,
+  logger.debug(
+    `黑名单清理完成，剩余 ${failedProxyBlacklist.size} 个`,
+    { module: "ProxyTester" },
   );
 }
 

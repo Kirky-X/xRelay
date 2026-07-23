@@ -117,6 +117,7 @@ async function handleCapture(
           title: result.title,
           url: result.url,
           mode: result.mode,
+          degraded: result.degraded,
           resources: result.resources,
           capturedAt: result.capturedAt,
           duration: result.duration,

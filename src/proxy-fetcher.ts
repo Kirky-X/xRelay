@@ -11,6 +11,7 @@
 import { PROXY_CONFIG, REQUEST_TIMEOUT_CONFIG } from "./config.js";
 import { validateProxyInfo, validateProxySource } from "./security.js";
 import { logger } from "./logger.js";
+import { getRandomUserAgent } from "./utils/user-agent.js";
 import type { ProxyInfo } from "./types/index.js";
 
 // 代理源配置
@@ -74,7 +75,7 @@ const PROXY_SOURCES = [
     },
   },
   {
-    name: "FreeProxyList",
+    name: "GitHub-TheSpeedX",
     url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/main/http.txt",
     parse: (text: string) => {
       return text
@@ -85,7 +86,7 @@ const PROXY_SOURCES = [
     },
   },
   {
-    name: "ProxyListDownload",
+    name: "GitHub-monosans",
     url: "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
     parse: (text: string) => {
       return text
@@ -167,8 +168,8 @@ async function fetchFromSource(
     const response = await fetch(source.url, {
       method: "GET",
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        // 每次抓取随机轮换 UA，避免被代理源站识别为爬虫
+        "User-Agent": getRandomUserAgent(),
       },
       signal: controller.signal,
     });

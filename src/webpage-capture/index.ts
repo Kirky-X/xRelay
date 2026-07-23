@@ -69,3 +69,9 @@ export {
   mergeCaptureOptions,
   SCROLL_CONFIG,
 } from './config.js';
+
+export {
+  STEALTH_SCRIPTS,
+  getStealthScriptCode,
+  type StealthScript,
+} from './stealth-scripts.js';

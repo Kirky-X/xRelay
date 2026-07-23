@@ -8,23 +8,9 @@
  */
 
 // 代理配置
+// 注意：代理源列表在 src/proxy-fetcher.ts 的 PROXY_SOURCES 中维护
+// 此处仅保留代理池与超时配置
 export const PROXY_CONFIG = {
-  // 代理源
-  sources: [
-    {
-      name: "ProxyScrape",
-      url: "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=5000&limit=20",
-    },
-    {
-      name: "FreeProxyList",
-      url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/main/http.txt",
-    },
-    {
-      name: "ProxyListDownload",
-      url: "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-    },
-  ],
-
   // 代理池配置
   pool: {
     refreshInterval: 5 * 60 * 1000, // 5分钟

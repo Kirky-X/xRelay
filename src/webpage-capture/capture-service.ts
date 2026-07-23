@@ -117,11 +117,22 @@ export class CaptureService {
         duration
       });
 
+      // 降级路径：仅 HTML 模式可降级为 fetch（无 JS 渲染）
+      // full 模式需要资源内联，无法降级
+      if (mode === 'html') {
+        logger.warn(`Browser unavailable, falling back to fetch: ${url}`, {
+          module: 'CaptureService',
+          originalError: errorMessage,
+        });
+
+        return await this.captureWithFetch(url, mergedOptions, errorMessage, startTime);
+      }
+
       return {
         success: false,
         error: errorMessage,
         url,
-        mode: options?.mode || 'html',
+        mode,
         duration,
       };
     } finally {
@@ -132,11 +143,102 @@ export class CaptureService {
   }
 
   /**
-   * 配置页面超时设置
+   * Fetch 降级捕获 - 无浏览器时直接 fetch HTML
+   * 仅返回静态 HTML，不渲染 JS、不处理动态内容
+   *
+   * 错误处理策略：浏览器失败 + fetch 失败 → 合并错误信息，便于排查
+   *
+   * @param browserError 原始浏览器错误（用于合并错误信息）
+   * @param startTime 整体开始时间
+   */
+  private async captureWithFetch(
+    url: string,
+    options: Required<CaptureOptions>,
+    browserError: string,
+    startTime: number,
+  ): Promise<CaptureResult> {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': options.userAgent,
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        redirect: 'follow',
+      });
+
+      if (!response.ok) {
+        const duration = Date.now() - startTime;
+        const fetchError = `Fetch fallback failed: HTTP ${response.status}`;
+        logger.warn(fetchError, { module: 'CaptureService', url });
+
+        return {
+          success: false,
+          error: `Browser: ${browserError}; Fetch: HTTP ${response.status}`,
+          url,
+          mode: 'html',
+          duration,
+        };
+      }
+
+      const html = await response.text();
+      const title = this.extractTitleFromHtml(html);
+      const finalUrl = response.url || url;
+      const duration = Date.now() - startTime;
+
+      logger.info(`Fetch fallback completed: ${url}`, {
+        module: 'CaptureService',
+        duration,
+        htmlLength: html.length,
+      });
+
+      return {
+        success: true,
+        html,
+        title,
+        url: finalUrl,
+        mode: 'html',
+        degraded: true,
+        capturedAt: new Date().toISOString(),
+        duration,
+      };
+    } catch (fetchError) {
+      const duration = Date.now() - startTime;
+      const fetchErrorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
+
+      logger.error(`Fetch fallback failed: ${url}`, fetchError instanceof Error ? fetchError : undefined, {
+        module: 'CaptureService',
+      });
+
+      return {
+        success: false,
+        error: `Browser: ${browserError}; Fetch: ${fetchErrorMessage}`,
+        url,
+        mode: 'html',
+        duration,
+      };
+    }
+  }
+
+  /**
+   * 从 HTML 中提取 <title> 标签内容（fetch 降级用）
+   */
+  private extractTitleFromHtml(html: string): string {
+    const match = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+    return match?.[1]?.trim() ?? '';
+  }
+
+  /**
+   * 配置页面（业务层）
+   * 职责：设置 viewport / timeout / UA（per-capture 配置）
+   * BrowserPool.configurePage 已注入 stealth 脚本（基础设施层），此处不重复
    */
   private async configurePage(page: Page, options: Required<CaptureOptions>): Promise<void> {
+    await page.setViewport(options.viewport);
     page.setDefaultTimeout(options.timeout);
     page.setDefaultNavigationTimeout(options.timeout);
+    // 应用 per-capture 的随机/自定义 UA（覆盖默认 UA 兜底）
+    await page.setUserAgent(options.userAgent);
   }
 
   /**

@@ -5,16 +5,22 @@
 
 /**
  * 网页捕获模块 - 浏览器实例池管理
- * 
+ *
  * 功能：
  * - 单例模式管理浏览器实例
  * - 支持并发请求的页面复用
  * - 自动清理空闲页面
  * - 错误处理和重连机制
+ *
+ * 部署兼容：
+ * - Vercel 环境：使用 @sparticuz/chromium 作为 Chromium 二进制源（serverless 优化）
+ * - 本地/容器环境：使用 puppeteer 自带 Chromium 或 CHROME_PATH 环境变量
  */
 
-import puppeteer, { Browser, Page, LaunchOptions } from 'puppeteer';
+import puppeteer, { Browser, Page, LaunchOptions } from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 import { BROWSER_CONFIG, PAGE_CONFIG, POOL_CONFIG } from './config.js';
+import { getStealthScriptCode } from './stealth-scripts.js';
 import { logger } from '../logger.js';
 
 /**
@@ -37,6 +43,70 @@ interface WaitQueueItem {
 }
 
 let instanceIdCounter = 0;
+
+/**
+ * 检测是否为 Vercel 无服务器环境
+ */
+export function isVercelEnvironment(): boolean {
+  return process.env.VERCEL === '1';
+}
+
+/**
+ * 解析浏览器启动参数（跨环境兼容）
+ *
+ * - Vercel：使用 @sparticuz/chromium 提供的 executablePath 与 args
+ * - 本地：优先使用 CHROME_PATH，其次使用 puppeteer 默认（自带 Chromium）
+ *
+ * 安全考虑：
+ * - Vercel 环境强制使用 @sparticuz/chromium，CHROME_PATH 被忽略（防止误用容器内 Chrome）
+ * - 容器环境（Docker）自动启用 --no-sandbox
+ */
+export async function resolveLaunchOptions(): Promise<LaunchOptions> {
+  const args = BROWSER_CONFIG.args;
+  const isVercel = isVercelEnvironment();
+
+  if (isVercel) {
+    // Vercel：@sparticuz/chromium 提供 serverless 优化的 Chromium
+    const executablePath = await chromium.executablePath();
+    logger.info('Using @sparticuz/chromium for Vercel environment', {
+      module: 'BrowserPool',
+      executablePath,
+    });
+
+    return {
+      headless: BROWSER_CONFIG.headless,
+      args: [...chromium.args, ...args],
+      executablePath,
+    };
+  }
+
+  // 本地环境：优先 CHROME_PATH（运行时读取，便于测试与动态配置）
+  const chromePath = process.env.CHROME_PATH;
+  if (chromePath) {
+    return {
+      headless: BROWSER_CONFIG.headless,
+      args,
+      executablePath: chromePath,
+    };
+  }
+
+  // 兜底：puppeteer 默认（开发依赖中 puppeteer 提供 Chromium 路径）
+  // 使用 dynamic import 避免在生产环境加载完整 puppeteer 包
+  try {
+    const puppeteerFull = (await import('puppeteer')).default;
+    return {
+      headless: BROWSER_CONFIG.headless,
+      args,
+      executablePath: puppeteerFull.executablePath(),
+    };
+  } catch (error) {
+    throw new Error(
+      'Unable to resolve Chromium executable path. ' +
+      'Set CHROME_PATH env var or install puppeteer as devDependency. ' +
+      `Original error: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
 
 /**
  * 浏览器池管理器
@@ -152,34 +222,30 @@ export class BrowserPool {
   }
 
   /**
-   * 配置页面
+   * 配置页面（基础设施层）
+   * 职责：仅设置 viewport 和注入 stealth 脚本
+   * 注意：UA / timeout 由 CaptureService.configurePage 显式设置（per-capture 配置）
+   * stealth 脚本是反检测的核心，必须在所有页面创建时注入
    */
   private async configurePage(page: Page): Promise<void> {
     await page.setViewport(PAGE_CONFIG.defaultViewport);
-    page.setDefaultTimeout(PAGE_CONFIG.defaultTimeout);
-    page.setDefaultNavigationTimeout(PAGE_CONFIG.defaultTimeout);
-    await page.setUserAgent(PAGE_CONFIG.defaultUserAgent);
 
-    await page.setRequestInterception(true);
-    page.on('request', (request) => {
-      request.continue();
-    });
+    // 合并注入全部 stealth 脚本为单次 CDP 调用（减少 serverless 30-120ms 延迟）
+    const stealthCode = getStealthScriptCode();
+    await page.evaluateOnNewDocument(stealthCode);
+    logger.debug('已注入 stealth 脚本', { module: 'BrowserPool' });
   }
 
   /**
    * 创建新的浏览器实例
    */
   private async createInstance(): Promise<BrowserInstance> {
-    const launchOptions: LaunchOptions = {
-      headless: BROWSER_CONFIG.headless,
-      args: BROWSER_CONFIG.args,
-    };
+    const launchOptions = await resolveLaunchOptions();
 
-    if (BROWSER_CONFIG.executablePath) {
-      launchOptions.executablePath = BROWSER_CONFIG.executablePath;
-    }
-
-    logger.info('Creating new browser instance', { module: 'BrowserPool' });
+    logger.info('Creating new browser instance', {
+      module: 'BrowserPool',
+      environment: isVercelEnvironment() ? 'vercel' : 'local',
+    });
 
     const browser = await puppeteer.launch(launchOptions);
 

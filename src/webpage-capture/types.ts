@@ -118,6 +118,9 @@ export interface CaptureResult {
   /** 使用的捕获模式 */
   mode?: CaptureMode;
 
+  /** 是否降级为 fetch（无 JS 渲染，浏览器不可用时） */
+  degraded?: boolean;
+
   /** 资源统计（仅 full 模式） */
   resources?: ResourceStats;
 
@@ -193,6 +196,7 @@ export interface CaptureResponse {
     title: string;
     url: string;
     mode: CaptureMode;
+    degraded?: boolean;
     resources?: ResourceStats;
     capturedAt: string;
     duration: number;

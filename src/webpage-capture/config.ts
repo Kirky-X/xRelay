@@ -14,6 +14,7 @@ import type {
   BrowserPoolConfig,
   CaptureOptions,
 } from './types.js';
+import { getRandomUserAgent } from '../utils/user-agent.js';
 
 /**
  * 检测是否在容器环境中运行
@@ -113,6 +114,7 @@ export const POOL_CONFIG: BrowserPoolConfig = {
 
 /**
  * 默认捕获选项
+ * 注意：userAgent 默认使用随机轮换（反检测），如需固定 UA 由调用方显式传入
  */
 export const DEFAULT_CAPTURE_OPTIONS: Omit<Required<CaptureOptions>, 'maxImageSize' | 'compressImages'> & { maxImageSize: number } = {
   mode: 'html',
@@ -132,17 +134,22 @@ export const DEFAULT_CAPTURE_OPTIONS: Omit<Required<CaptureOptions>, 'maxImageSi
 
 /**
  * 合并捕获选项
+ * 未指定 userAgent 时启用 UA 轮换（反检测）
  */
 export function mergeCaptureOptions(
   options?: CaptureOptions
 ): Required<CaptureOptions> {
   if (!options) {
-    return { ...DEFAULT_CAPTURE_OPTIONS };
+    return {
+      ...DEFAULT_CAPTURE_OPTIONS,
+      userAgent: getRandomUserAgent(),
+    };
   }
 
   return {
     ...DEFAULT_CAPTURE_OPTIONS,
     ...options,
+    userAgent: options.userAgent ?? getRandomUserAgent(),
     viewport: {
       ...DEFAULT_CAPTURE_OPTIONS.viewport,
       ...options.viewport,

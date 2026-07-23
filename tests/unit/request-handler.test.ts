@@ -44,6 +44,22 @@ vi.mock('../../src/config.js', () => ({
   DATABASE_CONFIG: {
     proxiesPerRequest: 3,
   },
+  SECURITY_CONFIG: {
+    allowedDomains: [],
+    allowedProtocols: ['http:', 'https:'],
+    blockedIpRanges: [
+      '127.0.0.0/8',
+      '10.0.0.0/8',
+      '172.16.0.0/12',
+      '192.168.0.0/16',
+      '169.254.0.0/16',
+      '::1/128',
+      'fc00::/7',
+      'fe80::/10',
+    ],
+    maxRequestSize: 100 * 1024,
+    enableVerboseLogging: false,
+  },
 }));
 
 describe('Request Handler - Header 过滤', () => {
@@ -695,8 +711,10 @@ describe('Request Handler - 响应体大小限制', () => {
     it('应该允许等于限制的响应体', async () => {
       vi.mocked(proxyManager.getAvailableProxy).mockResolvedValue(null);
 
-      // 创建一个刚好 10MB 的响应体
-      const exactContent = 'x'.repeat(10 * 1024 * 1024);
+      // MAX_RESPONSE_SIZE = SECURITY_CONFIG.maxRequestSize (100KB) * 100
+      // 测试 mock 中 maxRequestSize = 100 * 1024，故限制为 100 * 1024 * 100 字节
+      const maxRequestSizeMock = 100 * 1024;
+      const exactContent = 'x'.repeat(maxRequestSizeMock * 100);
 
       const mockFetch = vi.fn().mockResolvedValue(
         new Response(exactContent, {
