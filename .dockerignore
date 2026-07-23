@@ -50,7 +50,8 @@ Dockerfile
 docker-compose*.yml
 .dockerignore
 
-# Docker subdir (compose files already excluded above; keep dockerfile templates)
+# Docker subdir (compose files + Dockerfile template)
+docker/docker-compose*.yml
 docker/Dockerfile
 
 # Docs (not needed at runtime)
