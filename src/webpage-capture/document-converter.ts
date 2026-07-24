@@ -83,6 +83,15 @@ const turndownService = new TurndownService({
  */
 const SAFE_IMAGE_PROTOCOLS = new Set(['http:', 'https:']);
 
+/**
+ * parseHTML 输入大小上限（10MB）
+ *
+ * 防御 OOM：extractImagesAndLinks 和 sanitizeHtmlLinks 是公共 API，
+ * 可被外部直接调用，恶意输入（如 1GB HTML 字符串）会导致 linkedom 占用大量内存。
+ * 上游 capture-service 限制 fetch 响应体为 10MB，此处保持一致。
+ */
+const MAX_HTML_SIZE = 10 * 1024 * 1024;
+
 function isSafeImageUrl(url: URL): boolean {
   if (SAFE_IMAGE_PROTOCOLS.has(url.protocol)) return true;
   // data:image/* 允许（SVG 除外，因 SVG 可内嵌脚本）
@@ -137,6 +146,17 @@ export function extractImagesAndLinks(
 ): { images: ImageInfo[]; links: LinkInfo[] } {
   const result = { images: [] as ImageInfo[], links: [] as LinkInfo[] };
   if (!html) return result;
+
+  // 输入大小 guard：超过 MAX_HTML_SIZE 直接返回空，避免 linkedom 解析触发 OOM
+  if (html.length > MAX_HTML_SIZE) {
+    logger.warn('HTML exceeds MAX_HTML_SIZE, skipping extractImagesAndLinks', {
+      module: 'DocumentConverter',
+      baseUrl,
+      htmlLength: html.length,
+      maxHtmlSize: MAX_HTML_SIZE,
+    });
+    return result;
+  }
 
   let document: Document;
   try {
@@ -229,6 +249,16 @@ export function extractImagesAndLinks(
 function sanitizeHtmlLinks(html: string): string {
   if (!html) return '';
 
+  // 输入大小 guard：超过 MAX_HTML_SIZE 直接返回空，避免 linkedom 解析触发 OOM
+  if (html.length > MAX_HTML_SIZE) {
+    logger.warn('HTML exceeds MAX_HTML_SIZE, skipping sanitizeHtmlLinks', {
+      module: 'DocumentConverter',
+      htmlLength: html.length,
+      maxHtmlSize: MAX_HTML_SIZE,
+    });
+    return '';
+  }
+
   let document: Document;
   try {
     document = parseHTML(html).document;
@@ -273,6 +303,25 @@ function sanitizeHtmlLinks(html: string): string {
 }
 
 /**
+ * 单个中文 token 参与 N-gram 生成的最大长度
+ *
+ * 防御 DoS：攻击者构造超长无标点中文字符串时，N-gram 数量 ≈ 3 × len，
+ * 无上限会导致 freq Map 无界增长触发 OOM。
+ * 200 字已远超正常中文段落单句长度（典型 30-80 字），
+ * 截断后只对前 200 字生成 N-gram，超出部分不参与标签提取。
+ */
+const MAX_TOKEN_LEN_FOR_NGRAM = 200;
+
+/**
+ * N-gram 频率表全局大小上限（兜底防御）
+ *
+ * 即使每 token 截断到 200 字，多个 token 累计的 freq Map 仍可能膨胀。
+ * 达到此阈值后停止向 Map 写入，仅保留已收集的词频。
+ * 50000 个 entry 对应 ~5MB 内存（每 entry ~100B），可控。
+ */
+const MAX_NGRAM_MAP_SIZE = 50000;
+
+/**
  * 从文本内容中提取关键词作为标签
  *
  * 采用中文 N-gram (2-4 字) + 英文单词提取，结合停用词过滤和频率统计。
@@ -307,9 +356,15 @@ export function extractTags(content: string, maxTags: number): string[] {
       freq.set(word, (freq.get(word) || 0) + 1);
     } else {
       // 中文段：生成 2-4 字 N-gram
-      for (let len = 2; len <= Math.min(4, token.length); len++) {
-        for (let i = 0; i <= token.length - len; i++) {
-          const ngram = token.substring(i, i + len);
+      // 截断超长 token 防止 N-gram 数量爆炸（DoS 防御）
+      const effectiveToken = token.length > MAX_TOKEN_LEN_FOR_NGRAM
+        ? token.substring(0, MAX_TOKEN_LEN_FOR_NGRAM)
+        : token;
+      for (let len = 2; len <= Math.min(4, effectiveToken.length); len++) {
+        for (let i = 0; i <= effectiveToken.length - len; i++) {
+          // freq Map 达到上限后停止写入，保留已收集的词频（兜底防御）
+          if (freq.size >= MAX_NGRAM_MAP_SIZE) break;
+          const ngram = effectiveToken.substring(i, i + len);
           // 首尾是停用词的 N-gram 过滤
           if (STOP_WORDS.has(ngram[0])) continue;
           if (STOP_WORDS.has(ngram[ngram.length - 1])) continue;
@@ -317,6 +372,7 @@ export function extractTags(content: string, maxTags: number): string[] {
           if (STOP_WORDS.has(ngram)) continue;
           freq.set(ngram, (freq.get(ngram) || 0) + 1);
         }
+        if (freq.size >= MAX_NGRAM_MAP_SIZE) break;
       }
     }
   }
@@ -414,15 +470,25 @@ function escapeYamlValue(value: string | number | boolean): string {
  * - 换行符：标题/alt 文本中不允许换行，避免被截断为多段 Markdown
  *
  * 用于 alt 文本、链接文本、标题文本等会被拼入 Markdown 语法的位置
+ *
+ * 实现说明：使用单次 replace + 字符映射表，避免每文本多次全文扫描
+ * （原实现 6 趟 replace，1000 张图 = 6000 次扫描）
  */
+const MARKDOWN_TEXT_ESCAPE_MAP: Record<string, string> = {
+  '\r': ' ',
+  '\n': ' ',
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  '[': '\\[',
+  ']': '\\]',
+  '\\': '\\\\',
+};
+
 function escapeMarkdownText(text: string): string {
-  return text
-    .replace(/\r?\n/g, ' ')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/([[\]\\])/g, '\\$1');
+  if (!text) return '';
+  return text.replace(/[\r\n&<>"[\]\\]/g, (ch) => MARKDOWN_TEXT_ESCAPE_MAP[ch] ?? ch);
 }
 
 /**
@@ -593,6 +659,36 @@ export async function convertToStructuredDocument(
     // 后备提取器：article-extractor
     if (extractor === 'article-extractor') {
       const article = await extractArticle(html, baseUrl);
+
+      // 规则12：失败必须显性化。两个提取器都失败时返回失败结果，
+      // 不允许用空值继续构造 success=true 的文档谎报成功。
+      // 注意：article-extractor 返回 success=true 但 content 为空时不算失败，
+      // 因为它可能正确识别了页面但确实没有正文（如导航页）；此时 content 会留空，
+      // 后续 wordCount=0 自然反映，调用方可通过 wordCount/content 判断有效性。
+      if (!article.success) {
+        logger.warn('article-extractor also failed, returning failure', {
+          module: 'DocumentConverter',
+          url,
+          articleError: article.error,
+        });
+        return {
+          success: false,
+          title: extractTitleFromHtml(html) || '',
+          url,
+          content: '',
+          format: opts.format,
+          contentFormat,
+          images: [],
+          links: [],
+          tags: [],
+          wordCount: 0,
+          extractedAt: new Date().toISOString(),
+          extractor: 'article-extractor',
+          duration: Date.now() - startTime,
+          // 对外通用错误消息，详细错误仅入日志
+          error: 'All extractors failed to extract content',
+        };
+      }
 
       title = article.title || extractTitleFromHtml(html) || '';
       author = article.author;

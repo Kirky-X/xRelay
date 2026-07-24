@@ -13,7 +13,7 @@
  * - 处理动态内容、懒加载等
  */
 
-import type { Page } from "puppeteer";
+import type { Page } from 'puppeteer';
 import type {
   CaptureOptions,
   CaptureResult,

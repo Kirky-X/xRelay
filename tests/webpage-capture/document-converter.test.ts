@@ -19,7 +19,7 @@
  * 13. extractImagesAndLinks 合并函数复用 DOM
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   convertToStructuredDocument,
   extractImages,
@@ -502,10 +502,49 @@ describe('DocumentConverter - convertToStructuredDocument', () => {
     );
 
     expect(doc.extractor).toBe('article-extractor');
-    expect(doc.success).toBe(true);
+    // article-extractor 对 SAMPLE_HTML（简短测试 HTML）返回 success=false，
+    // 因为 @extractus/article-extractor 对内容过短的页面会返回 null。
+    // 修复 MED-003 后，convertToStructuredDocument 会正确传播失败状态，
+    // 不再用空值构造 success=true 的文档谎报成功。
+    expect(doc.success).toBe(false);
+    expect(doc.error).toBe('All extractors failed to extract content');
+    expect(doc.content).toBe('');
   });
 
-  it('应处理空 HTML 输入', async () => {
+  it('两个提取器都失败时应返回失败结果（规则12：失败必须显性化）', async () => {
+    // Mock extractArticle 返回失败，验证 defuddle 失败降级后 article-extractor 也失败时
+    // 不会用空值构造 success=true 的文档谎报成功
+    const articleExtractorModule = await import('../../src/webpage-capture/article-extractor.js');
+    const extractArticleSpy = vi
+      .spyOn(articleExtractorModule, 'extractArticle')
+      .mockResolvedValue({
+        success: false,
+        error: 'No article content found',
+        url: 'https://example.com/',
+      });
+
+    // 构造一个让 defuddle 也失败的 HTML（损坏的结构）
+    // 注意：defuddle 对简单 HTML 可能不抛错，所以用 article-extractor 显式失败 + 强制走后备路径
+    const doc = await convertToStructuredDocument(
+      '<html><body>some content</body></html>',
+      'https://example.com/',
+      { extractor: 'article-extractor' }
+    );
+
+    expect(doc.success).toBe(false);
+    expect(doc.error).toBeTruthy();
+    expect(doc.error).toBe('All extractors failed to extract content');
+    expect(doc.content).toBe('');
+    expect(doc.images).toEqual([]);
+    expect(doc.links).toEqual([]);
+    expect(doc.tags).toEqual([]);
+    // 错误消息不应包含内部细节
+    expect(doc.error).not.toMatch(/No article content found/);
+
+    extractArticleSpy.mockRestore();
+  });
+
+  it('空 HTML 输入应返回失败', async () => {
     const doc = await convertToStructuredDocument('', 'https://example.com/', {});
     expect(doc.success).toBe(false);
     expect(doc.error).toBeTruthy();
@@ -590,7 +629,41 @@ describe('DocumentConverter - convertToStructuredDocument', () => {
 
     expect(doc.success).toBe(true);
     expect(doc.wordCount).toBeGreaterThan(0);
-    // 性能基准：100KB 文档处理应在 5 秒内完成（含 defuddle 解析 + N-gram 提取）
-    expect(duration).toBeLessThan(5000);
+    // 性能基准：100KB 文档处理应在 1 秒内完成（含 defuddle 解析 + N-gram 提取）
+    // 实测 ~207ms，留 5 倍 buffer 防止 CI 环境抖动；原阈值 5000ms 过松无法捕获回归
+    expect(duration).toBeLessThan(1000);
+  });
+
+  it('恶意超长中文字符串不应触发 OOM（DoS 防御）', async () => {
+    // 构造 100KB 连续中文字符串（无标点切分），攻击 N-gram 提取的 token 长度无上限漏洞
+    // 修复前：N-gram 数量 ≈ 3 × len = 900K entries，~90MB 内存
+    // 修复后：token 截断到 200 字，N-gram 数量上限 600 entries
+    const maliciousContent = '非遗保护'.repeat(25000); // 100KB 连续中文
+    const bigHtml = `<html><head><title>恶意测试</title></head><body><article><p>${maliciousContent}</p></article></body></html>`;
+
+    const start = Date.now();
+    const startHeap = process.memoryUsage().heapUsed;
+    const doc = await convertToStructuredDocument(bigHtml, 'https://example.com/', {
+      extractTags: true,
+      maxTags: 10,
+    });
+    const duration = Date.now() - start;
+    const heapGrowth = process.memoryUsage().heapUsed - startHeap;
+
+    expect(doc.success).toBe(true);
+    // 处理时间应在 2 秒内（防止 N-gram 数量爆炸导致超时）
+    expect(duration).toBeLessThan(2000);
+    // 堆内存增长不应超过 100MB（防止 OOM）
+    expect(heapGrowth).toBeLessThan(100 * 1024 * 1024);
+  });
+
+  it('extractTags 应对超长中文 token 截断后仍能提取有效标签', () => {
+    // 构造 500 字连续中文（无标点），验证 token 截断不破坏标签提取
+    const longToken = '传统技艺保护传承发展非物质文化遗产'.repeat(20); // 500 字
+    const tags = extractTags(longToken, 5);
+    expect(tags.length).toBeGreaterThan(0);
+    expect(tags.length).toBeLessThanOrEqual(5);
+    // 应能提取到合理的中文词组
+    expect(tags.some(t => t.includes('传统') || t.includes('技艺') || t.includes('非遗'))).toBe(true);
   });
 });
