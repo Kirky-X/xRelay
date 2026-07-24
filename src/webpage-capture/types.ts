@@ -289,3 +289,135 @@ export interface ResourceConfig {
   /** 并发获取数量 */
   concurrency: number;
 }
+
+// ============================================================================
+// 结构化文档提取类型
+// ============================================================================
+
+/**
+ * 文档最终输出格式（调用方期望拿到的形态）
+ *
+ * - `markdown`：content 字段为 Markdown 文本
+ * - `html`：content 字段为 HTML 文本
+ * - `json`：调用方需通过 `generateJsonOutput(doc)` 生成完整 JSON 字符串；
+ *           此时 content 字段仍保留 Markdown 形式（由 contentFormat 指示），
+ *           避免把整个文档 JSON 写回 content 造成自指
+ */
+export type DocumentFormat = 'markdown' | 'json' | 'html';
+
+/**
+ * content 字段的实际格式
+ *
+ * 永远不会是 'json'，因为 content 字段不存放 JSON 字符串。
+ * 调用方读取此字段判断如何解析 content。
+ */
+export type ContentFormat = 'markdown' | 'html';
+
+/** 提取器类型 */
+export type ExtractorType = 'defuddle' | 'article-extractor';
+
+/** 图片信息 */
+export interface ImageInfo {
+  /** 图片 URL（绝对路径） */
+  url: string;
+  /** alt 文本 */
+  alt?: string;
+  /** 图片说明/标题 */
+  caption?: string;
+  /** 宽度（像素） */
+  width?: number;
+  /** 高度（像素） */
+  height?: number;
+}
+
+/** 链接信息 */
+export interface LinkInfo {
+  /** 链接 URL（绝对路径） */
+  url: string;
+  /** 链接文本 */
+  text: string;
+  /** 链接类型：内部（同域名）或外部 */
+  type: 'internal' | 'external';
+}
+
+/** 结构化文档提取选项 */
+export interface StructuredDocumentOptions {
+  /** 提取器：defuddle（默认，更准确）或 article-extractor（轻量） */
+  extractor?: ExtractorType;
+  /** 输出格式 */
+  format?: DocumentFormat;
+  /** 是否提取图片列表 */
+  extractImages?: boolean;
+  /** 是否提取链接列表 */
+  extractLinks?: boolean;
+  /** 是否自动提取标签 */
+  extractTags?: boolean;
+  /** 是否生成 YAML frontmatter（Markdown 格式时） */
+  generateFrontmatter?: boolean;
+  /** 标签最大数量 */
+  maxTags?: number;
+  /** 基础 URL（用于解析相对链接，默认从传入的 url 参数获取） */
+  baseUrl?: string;
+}
+
+/** 结构化文档提取结果 */
+export interface StructuredDocument {
+  /** 是否成功 */
+  success: boolean;
+
+  /** 文档标题 */
+  title: string;
+
+  /** 文档 URL */
+  url: string;
+
+  /** 作者 */
+  author?: string;
+
+  /** 发布日期（ISO 8601） */
+  publishedDate?: string;
+
+  /** 摘要描述 */
+  description?: string;
+
+  /** 正文内容（Markdown 或 HTML，由 contentFormat 字段指示实际格式） */
+  content: string;
+
+  /**
+   * 调用方期望的最终输出格式
+   *
+   * - `markdown`/`html`：content 字段已是对应格式，可直接使用
+   * - `json`：调用方需调用 `generateJsonOutput(doc)` 生成完整 JSON 字符串
+   */
+  format: DocumentFormat;
+
+  /** content 字段的实际格式（永远是 markdown 或 html，不会是 json） */
+  contentFormat: ContentFormat;
+
+  /** 原始 HTML（仅在 format='markdown' 时可能保留，供需要原始 HTML 的场景使用） */
+  html?: string;
+
+  /** 提取的图片列表 */
+  images: ImageInfo[];
+
+  /** 提取的链接列表 */
+  links: LinkInfo[];
+
+  /** 自动提取的标签 */
+  tags: string[];
+
+  /** 正文字数 */
+  wordCount: number;
+
+  /** 提取时间（ISO 8601） */
+  extractedAt: string;
+
+  /** 使用的提取器 */
+  extractor: ExtractorType;
+
+  /** 处理耗时（毫秒） */
+  duration?: number;
+
+  /** 错误信息（对外通用消息，详细错误仅入日志） */
+  error?: string;
+}

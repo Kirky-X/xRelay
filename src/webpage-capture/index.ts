@@ -35,6 +35,13 @@ export {
   type ResourceStats,
   type ResourceInfo,
   type ArticleResult,
+  type DocumentFormat,
+  type ContentFormat,
+  type ExtractorType,
+  type ImageInfo,
+  type LinkInfo,
+  type StructuredDocumentOptions,
+  type StructuredDocument,
 } from './types.js';
 
 export {
@@ -58,6 +65,21 @@ export {
   extractArticleFromUrl,
   stripHtmlTags,
 } from './article-extractor.js';
+
+export {
+  convertToStructuredDocument,
+  extractImages,
+  extractLinks,
+  extractImagesAndLinks,
+  extractTags,
+  generateFrontmatter,
+  generateMarkdownOutput,
+  generateJsonOutput,
+} from './document-converter.js';
+
+export {
+  extractTitleFromHtml,
+} from './html-utils.js';
 
 export {
   CAPTURE_CONFIG,

@@ -137,16 +137,17 @@ export async function extractArticle(
     };
   } catch (error) {
     const duration = Date.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
+    // 详细错误仅入日志，对外返回通用消息（与 document-converter 错误处理策略一致，
+    // 避免将底层异常细节、内部路径或第三方库错误消息泄露给调用方）
     logger.error(`Failed to extract article: ${url}`, error instanceof Error ? error : undefined, {
       module: 'ArticleExtractor',
       duration,
+      errorMessage: error instanceof Error ? error.message : String(error),
     });
 
     return {
       success: false,
-      error: errorMessage,
+      error: 'Failed to extract article',
       url,
     };
   }
@@ -204,16 +205,16 @@ export async function extractArticleFromUrl(url: string): Promise<ArticleResult>
     };
   } catch (error) {
     const duration = Date.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
+    // 详细错误仅入日志，对外返回通用消息
     logger.error(`Failed to extract article from URL: ${url}`, error instanceof Error ? error : undefined, {
       module: 'ArticleExtractor',
       duration,
+      errorMessage: error instanceof Error ? error.message : String(error),
     });
 
     return {
       success: false,
-      error: errorMessage,
+      error: 'Failed to extract article from URL',
       url,
     };
   }

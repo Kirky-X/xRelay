@@ -24,6 +24,7 @@ import { mergeCaptureOptions, SCROLL_CONFIG } from "./config.js";
 import { BrowserPool, getBrowserPool } from "./browser-pool.js";
 import { createResourceProcessor } from "./resource-processor.js";
 import { extractArticle } from "./article-extractor.js";
+import { extractTitleFromHtml } from "./html-utils.js";
 import { logger } from "../logger.js";
 import { request as undiciRequest } from "undici";
 import { createPinnedAgent } from "../utils/pinned-agent.js";
@@ -279,7 +280,7 @@ export class CaptureService {
         response.body,
         MAX_FETCH_RESPONSE_SIZE,
       );
-      const title = this.extractTitleFromHtml(html);
+      const title = extractTitleFromHtml(html);
       const finalUrl = response.url || url;
       const duration = Date.now() - startTime;
 
@@ -372,7 +373,7 @@ export class CaptureService {
         response.body as unknown as UndiciBodyLike | null,
         MAX_FETCH_RESPONSE_SIZE,
       );
-      const title = this.extractTitleFromHtml(html);
+      const title = extractTitleFromHtml(html);
       const duration = Date.now() - startTime;
 
       logger.info(`Pinned fetch fallback completed: ${url}`, {
@@ -423,14 +424,6 @@ export class CaptureService {
         );
       }
     }
-  }
-
-  /**
-   * 从 HTML 中提取 <title> 标签内容（fetch 降级用）
-   */
-  private extractTitleFromHtml(html: string): string {
-    const match = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-    return match?.[1]?.trim() ?? "";
   }
 
   /**
