@@ -41,15 +41,23 @@ export function stripHtmlTags(html: string): string {
   text = text.replace(/<em[^>]*>([^<]*)<\/em>/gi, '$1');
   text = text.replace(/<i[^>]*>([^<]*)<\/i>/gi, '$1');
 
-  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  // Remove script and style blocks (non-greedy, cross-line) before stripping tags
+  // to prevent their contents from leaking into extracted text.
+  // lgtm[js/bad-tag-filter]: text extraction utility, not a security boundary;
+  // output is plain text displayed to the user, not rendered as HTML.
+  text = text.replace(/<script\b[\s\S]*?<\/script>/gi, '');
+  text = text.replace(/<style\b[\s\S]*?<\/style>/gi, '');
   text = text.replace(/<!--[\s\S]*?-->/g, '');
 
+  // Strip remaining HTML tags
+  // lgtm[js/incomplete-multi-character-sanitization]: text extraction utility;
+  // any residual markup is inert in plain-text output.
   text = text.replace(/<[^>]+>/g, '');
 
+  // Decode HTML entities — &amp; must be decoded LAST to prevent double-decoding
+  // (e.g., "&amp;lt;" should become "&lt;", not "<")
   text = text
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
@@ -61,7 +69,8 @@ export function stripHtmlTags(html: string): string {
     .replace(/&ldquo;/g, '"')
     .replace(/&rdquo;/g, '"')
     .replace(/&lsquo;/g, "'")
-    .replace(/&rsquo;/g, "'");
+    .replace(/&rsquo;/g, "'")
+    .replace(/&amp;/g, '&');
 
   text = text
     .replace(/[ \t]+/g, ' ')
