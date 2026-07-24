@@ -21,6 +21,7 @@ import { checkRateLimit } from "../middleware/rate-limit.js";
 import { validateUrl, validateDnsResolution } from "../security.js";
 import { AppError, ErrorCode } from "../errors/index.js";
 import {
+  APP_VERSION,
   CORS_CONFIG,
   FEATURES,
   isProduction,
@@ -29,7 +30,10 @@ import {
 import { logger } from "../logger.js";
 import type { ProxyRequest } from "../types/index.js";
 import { captureWebpage } from "../webpage-capture/index.js";
-import type { CaptureRequest, CaptureOptions } from "../webpage-capture/types.js";
+import type {
+  CaptureRequest,
+  CaptureOptions,
+} from "../webpage-capture/types.js";
 
 /**
  * 请求上下文 - 跨运行时中立
@@ -84,8 +88,7 @@ if (isProduction()) {
 export function setSecurityHeaders(headers: Record<string, string>): void {
   headers["X-Content-Type-Options"] = "nosniff";
   headers["X-Frame-Options"] = "DENY";
-  headers["Strict-Transport-Security"] =
-    "max-age=31536000; includeSubDomains";
+  headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
   headers["X-XSS-Protection"] = "1; mode=block";
   headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
   headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()";
@@ -134,7 +137,7 @@ function handleHealthCheck(
     body: {
       status: "healthy",
       timestamp: new Date().toISOString(),
-      version: "0.2.0",
+      version: APP_VERSION,
       uptime: Math.floor(process.uptime?.() ?? 0),
       requestId: ctx.requestId,
     },
@@ -303,11 +306,9 @@ async function handleCapture(
     return {
       status: 500,
       headers,
-      body: new AppError(
-        ErrorCode.INTERNAL_ERROR,
-        errorMessage,
-        500,
-      ).toJSON(ctx.requestId),
+      body: new AppError(ErrorCode.INTERNAL_ERROR, errorMessage, 500).toJSON(
+        ctx.requestId,
+      ),
     };
   }
 }
@@ -396,7 +397,10 @@ async function handleProxy(
 
       // SSRF TOCTOU 防护：将已验证的 IP 传入 request 对象，
       // 直连 fallback 路径会通过 pinned DNS 固定到该 IP
-      resolvedIp = dnsResult.ips && dnsResult.ips.length > 0 ? dnsResult.ips[0] : undefined;
+      resolvedIp =
+        dnsResult.ips && dnsResult.ips.length > 0
+          ? dnsResult.ips[0]
+          : undefined;
     } catch (dnsError) {
       // DNS 验证异常：fail-closed，防止攻击者通过触发 DNS 错误绕过 SSRF 防护
       logger.error(
@@ -457,11 +461,9 @@ async function handleProxy(
     return {
       status: 500,
       headers,
-      body: new AppError(
-        ErrorCode.INTERNAL_ERROR,
-        errorMessage,
-        500,
-      ).toJSON(ctx.requestId),
+      body: new AppError(ErrorCode.INTERNAL_ERROR, errorMessage, 500).toJSON(
+        ctx.requestId,
+      ),
     };
   }
 }
@@ -479,7 +481,9 @@ async function handleProxy(
  * @param ctx 请求上下文（运行时中立）
  * @returns 响应规格（运行时中立）
  */
-export async function dispatchRequest(ctx: RequestContext): Promise<ResponseSpec> {
+export async function dispatchRequest(
+  ctx: RequestContext,
+): Promise<ResponseSpec> {
   const headers: Record<string, string> = {};
   setSecurityHeaders(headers);
   setCorsHeaders(headers, ctx.headers.get("origin") || undefined);
@@ -490,7 +494,9 @@ export async function dispatchRequest(ctx: RequestContext): Promise<ResponseSpec
 
   if (
     ctx.method === "GET" &&
-    (ctx.path === "/api/health" || ctx.path === "/api/ready" || ctx.path === "/api")
+    (ctx.path === "/api/health" ||
+      ctx.path === "/api/ready" ||
+      ctx.path === "/api")
   ) {
     return handleHealthCheck(headers, ctx);
   }

@@ -48,9 +48,11 @@ import { validateUrl } from "./security.js";
  * 避免静默 fail-open 导致 SSRF TOCTOU 防护失效（规则12：失败显性化）。
  */
 // IPv4 点分十进制正则（保守，仅匹配 0-255 段）
-const IPV4_REGEX = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+const IPV4_REGEX =
+  /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
 // IPv6 简化正则：覆盖常见形式（含 ::、IPv4-mapped、点分末段）
-const IPV6_REGEX = /^(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}|:(?::[0-9a-fA-F]{1,4}){1,7}|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{0,4}|(?:[0-9a-fA-F]{1,4}:){1,5}:[0-9]{1,3}(?:\.[0-9]{1,3}){3}|(?:[0-9a-fA-F]{1,4}:){1,4}:[0-9]{1,3}(?:\.[0-9]{1,3}){3})$/;
+const IPV6_REGEX =
+  /^(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}|:(?::[0-9a-fA-F]{1,4}){1,7}|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{0,4}|(?:[0-9a-fA-F]{1,4}:){1,5}:[0-9]{1,3}(?:\.[0-9]{1,3}){3}|(?:[0-9a-fA-F]{1,4}:){1,4}:[0-9]{1,3}(?:\.[0-9]{1,3}){3})$/;
 function isValidIpAddress(ip: string): boolean {
   // 优先使用 node:net.isIP（更严格、覆盖更全）
   if (typeof netIsIP === "function") {
@@ -112,7 +114,10 @@ function getProxyAgent(proxyUrl: string): ProxyAgent {
       const oldestAgent = proxyAgentPool.get(oldestKey);
       // close() 返回 Promise，显式 catch 避免未处理 rejection（规则12：失败显性化）
       oldestAgent?.close().catch((err: unknown) => {
-        logger.debug(`关闭 ProxyAgent 时出错: ${err instanceof Error ? err.message : String(err)}`, { module: "RequestHandler" });
+        logger.debug(
+          `关闭 ProxyAgent 时出错: ${err instanceof Error ? err.message : String(err)}`,
+          { module: "RequestHandler" },
+        );
       });
       proxyAgentPool.delete(oldestKey);
     }
@@ -133,7 +138,10 @@ export async function closeAllProxyAgents(): Promise<void> {
     // close() 返回 Promise，统一收集后 await
     closePromises.push(
       agent.close().catch((err: unknown) => {
-        logger.debug(`关闭 ProxyAgent 时出错: ${err instanceof Error ? err.message : String(err)}`, { module: "RequestHandler" });
+        logger.debug(
+          `关闭 ProxyAgent 时出错: ${err instanceof Error ? err.message : String(err)}`,
+          { module: "RequestHandler" },
+        );
       }),
     );
   }
@@ -178,7 +186,10 @@ function getPinnedAgent(resolvedIp: string): Agent {
       const oldestAgent = pinnedAgentPool.get(oldestKey);
       // close() 返回 Promise，显式 catch 避免未处理 rejection
       oldestAgent?.close().catch((err: unknown) => {
-        logger.debug(`关闭 pinned Agent 时出错: ${err instanceof Error ? err.message : String(err)}`, { module: "RequestHandler" });
+        logger.debug(
+          `关闭 pinned Agent 时出错: ${err instanceof Error ? err.message : String(err)}`,
+          { module: "RequestHandler" },
+        );
       });
       pinnedAgentPool.delete(oldestKey);
     }
@@ -198,7 +209,10 @@ export async function closeAllPinnedAgents(): Promise<void> {
   for (const agent of pinnedAgentPool.values()) {
     closePromises.push(
       agent.close().catch((err: unknown) => {
-        logger.debug(`关闭 pinned Agent 时出错: ${err instanceof Error ? err.message : String(err)}`, { module: "RequestHandler" });
+        logger.debug(
+          `关闭 pinned Agent 时出错: ${err instanceof Error ? err.message : String(err)}`,
+          { module: "RequestHandler" },
+        );
       }),
     );
   }
@@ -364,9 +378,13 @@ async function sendRequestWithProxy(
     const combinedController = new AbortController();
 
     // 监听超时 signal（once: true 触发后自动移除监听器）
-    timeoutController.signal.addEventListener("abort", () => {
-      combinedController.abort();
-    }, { once: true });
+    timeoutController.signal.addEventListener(
+      "abort",
+      () => {
+        combinedController.abort();
+      },
+      { once: true },
+    );
 
     // 监听外部 signal（如果存在）
     if (externalSignal) {
@@ -374,9 +392,13 @@ async function sendRequestWithProxy(
         // 如果外部 signal 已经被取消，直接中止
         combinedController.abort();
       } else {
-        externalSignal.addEventListener("abort", () => {
-          combinedController.abort();
-        }, { once: true });
+        externalSignal.addEventListener(
+          "abort",
+          () => {
+            combinedController.abort();
+          },
+          { once: true },
+        );
       }
     }
 
@@ -457,7 +479,9 @@ async function sendRequestWithProxy(
  * SSRF TOCTOU 防护：当 request.resolvedIp 提供时，使用 pinned DNS Agent
  * 将域名固定到已验证的 IP，防止第二次 DNS 解析返回内网地址。
  */
-async function sendRequestDirect(request: ProxyRequest): Promise<RequestResult> {
+async function sendRequestDirect(
+  request: ProxyRequest,
+): Promise<RequestResult> {
   logger.debug(`使用直连模式`, { module: "RequestHandler" });
   // ProxyRequest.method 可选：未指定时按 GET 处理
   const method = (request.method ?? "GET").toUpperCase() as HttpMethod;
@@ -475,18 +499,27 @@ async function sendRequestDirect(request: ProxyRequest): Promise<RequestResult> 
     };
   }
 
-  // SSRF TOCTOU 防护：有 resolvedIp 时走 pinned DNS 路径
-  // 仅当 resolvedIp 是有效 IP 地址时才使用 pinned DNS，避免无效值导致连接失败
+  // SSRF TOCTOU 防护：有有效 resolvedIp 时优先 pinned DNS；失败则回退标准 fetch。
+  // 生产环境 pinned 路径曾因 resolvedIp 异常崩溃，回退保障可用性（规则12：失败显性化）。
   if (request.resolvedIp && isValidIpAddress(request.resolvedIp)) {
-    return sendRequestDirectPinned(request, method);
+    const pinnedResult = await sendRequestDirectPinned(request, method);
+    if (pinnedResult.success) {
+      return pinnedResult;
+    }
+    // pinned 失败：回退标准 fetch。URL 已过 validateUrl + 上层 validateDnsResolution，SSRF 可控。
+    logger.warn(`pinned DNS 直连失败，回退标准 fetch: ${pinnedResult.error}`, {
+      module: "RequestHandler",
+      url: request.url,
+    });
+  } else if (request.resolvedIp && !isValidIpAddress(request.resolvedIp)) {
+    // resolvedIp 无效时，走标准 fetch 路径（向后兼容）
+    logger.warn(
+      `resolvedIp 值无效（${request.resolvedIp}），使用标准 fetch 路径`,
+      { module: "RequestHandler" },
+    );
   }
 
-  // resolvedIp 无效或未提供时，走标准 fetch 路径（向后兼容）
-  if (request.resolvedIp && !isValidIpAddress(request.resolvedIp)) {
-    logger.warn(`resolvedIp 值无效（${request.resolvedIp}），回退到标准 fetch 路径`, { module: "RequestHandler" });
-  }
-
-  // 无 resolvedIp 时保持原有 fetch 路径（向后兼容）
+  // 标准 fetch 路径（无 pinned DNS）
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(

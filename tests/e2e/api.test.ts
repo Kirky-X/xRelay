@@ -162,7 +162,7 @@ describe("API 端到端测试", () => {
         status: "healthy",
       });
       expect((res.body as { timestamp: string }).timestamp).toBeDefined();
-      expect((res.body as { version: string }).version).toBe("0.2.0");
+      expect((res.body as { version: string }).version).toBe("0.2.2");
     });
 
     it("GET /api/health 应返回 200", async () => {
@@ -253,7 +253,11 @@ describe("API 端到端测试", () => {
 
       expect(mockExecute).toHaveBeenCalledTimes(1);
       expect(res.statusCode).toBe(200);
-      const body = res.body as { success: boolean; proxyUsed: boolean; requestId: string };
+      const body = res.body as {
+        success: boolean;
+        proxyUsed: boolean;
+        requestId: string;
+      };
       expect(body.success).toBe(true);
       expect(body.proxyUsed).toBe(true);
       expect(body.requestId).toBeDefined();
@@ -454,7 +458,9 @@ describe("API 端到端测试", () => {
 
       await callHandler(req, res);
 
-      expect(res.headers["Access-Control-Allow-Origin"]).toBe("http://localhost:3000");
+      expect(res.headers["Access-Control-Allow-Origin"]).toBe(
+        "http://localhost:3000",
+      );
       expect(res.headers["Vary"]).toBe("Origin");
     });
 
@@ -469,7 +475,9 @@ describe("API 端到端测试", () => {
       await callHandler(req, res);
 
       expect(res.headers["Access-Control-Allow-Methods"]).toBe("POST, OPTIONS");
-      expect(res.headers["Access-Control-Allow-Headers"]).toContain("Content-Type");
+      expect(res.headers["Access-Control-Allow-Headers"]).toContain(
+        "Content-Type",
+      );
     });
   });
 

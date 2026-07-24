@@ -3,7 +3,9 @@
  * License: MIT
  */
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+import { APP_VERSION } from "./config.js";
+
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface LogEntry {
   timestamp: string;
@@ -20,9 +22,9 @@ export interface LogEntry {
 }
 
 class Logger {
-  private service = 'xRelay';
-  private version = '0.2.0';
-  private environment = process.env.NODE_ENV || 'production';
+  private service = "xRelay";
+  private version = APP_VERSION;
+  private environment = process.env.NODE_ENV || "production";
 
   private format(entry: LogEntry): string {
     return JSON.stringify(entry);
@@ -33,23 +35,27 @@ class Logger {
   }
 
   debug(message: string, context?: Record<string, unknown>): void {
-    if (process.env.DEBUG === 'true') {
-      this.log('debug', message, context);
+    if (process.env.DEBUG === "true") {
+      this.log("debug", message, context);
     }
   }
 
   info(message: string, context?: Record<string, unknown>): void {
-    this.log('info', message, context);
+    this.log("info", message, context);
   }
 
   warn(message: string, context?: Record<string, unknown>): void {
-    this.log('warn', message, context);
+    this.log("warn", message, context);
   }
 
-  error(message: string, error?: Error, context?: Record<string, unknown>): void {
+  error(
+    message: string,
+    error?: Error,
+    context?: Record<string, unknown>,
+  ): void {
     const entry: LogEntry = {
       timestamp: this.getTimestamp(),
-      level: 'error',
+      level: "error",
       message,
       context: {
         service: this.service,
@@ -70,7 +76,11 @@ class Logger {
     console.error(this.format(entry));
   }
 
-  private log(level: LogLevel, message: string, context?: Record<string, unknown>): void {
+  private log(
+    level: LogLevel,
+    message: string,
+    context?: Record<string, unknown>,
+  ): void {
     const entry: LogEntry = {
       timestamp: this.getTimestamp(),
       level,
@@ -87,7 +97,11 @@ class Logger {
   }
 
   // Performance logging
-  logPerformance(operation: string, duration: number, metadata?: Record<string, unknown>): void {
+  logPerformance(
+    operation: string,
+    duration: number,
+    metadata?: Record<string, unknown>,
+  ): void {
     this.info(`Performance: ${operation}`, {
       duration_ms: duration,
       ...metadata,
@@ -95,8 +109,14 @@ class Logger {
   }
 
   // Request logging
-  logRequest(requestId: string, method: string, url: string, statusCode: number, duration: number): void {
-    this.info('Request completed', {
+  logRequest(
+    requestId: string,
+    method: string,
+    url: string,
+    statusCode: number,
+    duration: number,
+  ): void {
+    this.info("Request completed", {
       requestId,
       method,
       url: this.sanitizeUrl(url),

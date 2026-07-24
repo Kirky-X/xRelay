@@ -287,14 +287,14 @@ describe("Security Extras - resolveDns DoH 路径（覆盖 line 484, 489-501）"
       if (url.includes("type=AAAA")) {
         return Promise.resolve(
           new Response(
-            JSON.stringify({ Answer: [{ data: "2001:db8::1" }] }),
+            JSON.stringify({ Answer: [{ type: 28, data: "2001:db8::1" }] }),
             { status: 200, headers: { "content-type": "application/dns-json" } },
           ),
         );
       }
       return Promise.resolve(
         new Response(
-          JSON.stringify({ Answer: [{ data: "1.2.3.4" }, { data: "5.6.7.8" }] }),
+          JSON.stringify({ Answer: [{ type: 1, data: "1.2.3.4" }, { type: 1, data: "5.6.7.8" }] }),
           { status: 200, headers: { "content-type": "application/dns-json" } },
         ),
       );
@@ -315,7 +315,7 @@ describe("Security Extras - resolveDns DoH 路径（覆盖 line 484, 489-501）"
     global.fetch = vi.fn().mockImplementation(() =>
       Promise.resolve(
         new Response(
-          JSON.stringify({ Answer: [{ data: "1.1.1.1" }] }),
+          JSON.stringify({ Answer: [{ type: 1, data: "1.1.1.1" }] }),
           { status: 200 },
         ),
       ),
@@ -339,7 +339,7 @@ describe("Security Extras - resolveDns DoH 路径（覆盖 line 484, 489-501）"
         return Promise.reject(new Error("AAAA query failed"));
       }
       return Promise.resolve(
-        new Response(JSON.stringify({ Answer: [{ data: "1.2.3.4" }] }), { status: 200 }),
+        new Response(JSON.stringify({ Answer: [{ type: 1, data: "1.2.3.4" }] }), { status: 200 }),
       );
     }) as unknown as typeof globalThis.fetch;
 
@@ -355,7 +355,7 @@ describe("Security Extras - resolveDns DoH 路径（覆盖 line 484, 489-501）"
     global.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes("type=AAAA")) {
         return Promise.resolve(
-          new Response(JSON.stringify({ Answer: [{ data: "2001:db8::1" }] }), { status: 200 }),
+          new Response(JSON.stringify({ Answer: [{ type: 28, data: "2001:db8::1" }] }), { status: 200 }),
         );
       }
       return Promise.reject(new Error("A query failed"));
@@ -391,7 +391,7 @@ describe("Security Extras - resolveDns DoH 路径（覆盖 line 484, 489-501）"
     global.fetch = vi.fn().mockImplementation(() =>
       Promise.resolve(
         new Response(
-          JSON.stringify({ Answer: [{ data: "1.2.3.4" }, { data: "" }, { data: "5.6.7.8" }] }),
+          JSON.stringify({ Answer: [{ type: 1, data: "1.2.3.4" }, { type: 1, data: "" }, { type: 1, data: "5.6.7.8" }] }),
           { status: 200 },
         ),
       ),
@@ -411,11 +411,11 @@ describe("Security Extras - resolveDns DoH 路径（覆盖 line 484, 489-501）"
     global.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes("type=A")) {
         return Promise.resolve(
-          new Response(JSON.stringify({ Answer: [{ data: "1.2.3.4" }, { data: "1.2.3.4" }] }), { status: 200 }),
+          new Response(JSON.stringify({ Answer: [{ type: 1, data: "1.2.3.4" }, { type: 1, data: "1.2.3.4" }] }), { status: 200 }),
         );
       }
       return Promise.resolve(
-        new Response(JSON.stringify({ Answer: [{ data: "1.2.3.4" }] }), { status: 200 }),
+        new Response(JSON.stringify({ Answer: [{ type: 1, data: "1.2.3.4" }] }), { status: 200 }),
       );
     }) as unknown as typeof globalThis.fetch;
 
@@ -442,7 +442,7 @@ describe("Security Extras - resolveDns 缓存淘汰（覆盖 line 495-497）", (
     // 每次调用必须返回新的 Response，否则 body 被消费后 json() 失败导致缓存为空
     global.fetch = vi.fn().mockImplementation(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ Answer: [{ data: "1.1.1.1" }] }), { status: 200 }),
+        new Response(JSON.stringify({ Answer: [{ type: 1, data: "1.1.1.1" }] }), { status: 200 }),
       ),
     ) as unknown as typeof globalThis.fetch;
 
@@ -456,7 +456,7 @@ describe("Security Extras - resolveDns 缓存淘汰（覆盖 line 495-497）", (
     // 验证最旧条目（host-0）已被淘汰：重新查询应触发 fetch
     const fetchSpy = vi.fn().mockImplementation(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ Answer: [{ data: "2.2.2.2" }] }), { status: 200 }),
+        new Response(JSON.stringify({ Answer: [{ type: 1, data: "2.2.2.2" }] }), { status: 200 }),
       ),
     );
     global.fetch = fetchSpy as unknown as typeof globalThis.fetch;
@@ -471,7 +471,7 @@ describe("Security Extras - resolveDns 缓存淘汰（覆盖 line 495-497）", (
     // 每次调用必须返回新的 Response，否则 body 被消费后 json() 失败导致缓存为空
     global.fetch = vi.fn().mockImplementation(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ Answer: [{ data: "1.1.1.1" }] }), { status: 200 }),
+        new Response(JSON.stringify({ Answer: [{ type: 1, data: "1.1.1.1" }] }), { status: 200 }),
       ),
     ) as unknown as typeof globalThis.fetch;
 

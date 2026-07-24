@@ -526,8 +526,8 @@ export async function resolveDns(hostname: string): Promise<string[]> {
 
     const extractAnswers = async (resp: PromiseSettledResult<Response>) => {
       if (resp.status !== 'fulfilled' || !resp.value.ok) return;
-      const data = await resp.value.json() as { Answer?: { data: string }[] };
-      const records = data.Answer?.map(a => a.data).filter(Boolean) || [];
+      const data = await resp.value.json() as { Answer?: { type: number; data: string }[] };
+      const records = data.Answer?.filter(a => a.type === 1 || a.type === 28).map(a => a.data).filter(Boolean) || [];
       ips.push(...records);
     };
 

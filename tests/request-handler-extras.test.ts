@@ -18,52 +18,47 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ProxyRequest } from "../src/types/index.js";
 
 // 使用 vi.hoisted 提升 mock 引用，避免 TDZ
-const {
-  proxyManagerMock,
-  loggerMock,
-  configMock,
-  undiciMock,
-  userAgentMock,
-} = vi.hoisted(() => ({
-  proxyManagerMock: {
-    getAvailableProxy: vi.fn(),
-    getMultipleProxies: vi.fn(),
-    reportProxyFailed: vi.fn(),
-    reportProxySuccess: vi.fn(),
-  },
-  loggerMock: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  },
-  configMock: {
-    REQUEST_TIMEOUT_CONFIG: { proxy: 30000, direct: 10000 },
-    DATABASE_CONFIG: { proxiesPerRequest: 3 },
-    SECURITY_CONFIG: {
-      allowedDomains: [],
-      allowedProtocols: ["http:", "https:"],
-      blockedIpRanges: [],
-      maxRequestSize: 100 * 1024,
-      enableVerboseLogging: false,
+const { proxyManagerMock, loggerMock, configMock, undiciMock, userAgentMock } =
+  vi.hoisted(() => ({
+    proxyManagerMock: {
+      getAvailableProxy: vi.fn(),
+      getMultipleProxies: vi.fn(),
+      reportProxyFailed: vi.fn(),
+      reportProxySuccess: vi.fn(),
     },
-  },
-  undiciMock: {
-    request: vi.fn(),
-    // ProxyAgent 构造函数：必须用普通 function 才能被 new 调用
-    // close() 返回 Promise（与真实 undici ProxyAgent 一致）
-    ProxyAgent: vi.fn(function (this: { close: ReturnType<typeof vi.fn> }) {
-      this.close = vi.fn().mockResolvedValue(undefined);
-    }),
-    // Agent 构造函数：用于 pinned DNS 直连路径
-    Agent: vi.fn(function (this: { close: ReturnType<typeof vi.fn> }) {
-      this.close = vi.fn().mockResolvedValue(undefined);
-    }),
-  },
-  userAgentMock: {
-    getRandomUserAgent: vi.fn(() => "TestUA/1.0"),
-  },
-}));
+    loggerMock: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    },
+    configMock: {
+      REQUEST_TIMEOUT_CONFIG: { proxy: 30000, direct: 10000 },
+      DATABASE_CONFIG: { proxiesPerRequest: 3 },
+      SECURITY_CONFIG: {
+        allowedDomains: [],
+        allowedProtocols: ["http:", "https:"],
+        blockedIpRanges: [],
+        maxRequestSize: 100 * 1024,
+        enableVerboseLogging: false,
+      },
+    },
+    undiciMock: {
+      request: vi.fn(),
+      // ProxyAgent 构造函数：必须用普通 function 才能被 new 调用
+      // close() 返回 Promise（与真实 undici ProxyAgent 一致）
+      ProxyAgent: vi.fn(function (this: { close: ReturnType<typeof vi.fn> }) {
+        this.close = vi.fn().mockResolvedValue(undefined);
+      }),
+      // Agent 构造函数：用于 pinned DNS 直连路径
+      Agent: vi.fn(function (this: { close: ReturnType<typeof vi.fn> }) {
+        this.close = vi.fn().mockResolvedValue(undefined);
+      }),
+    },
+    userAgentMock: {
+      getRandomUserAgent: vi.fn(() => "TestUA/1.0"),
+    },
+  }));
 
 vi.mock("../src/proxy-manager.js", () => proxyManagerMock);
 vi.mock("../src/logger.js", () => ({ logger: loggerMock }));
@@ -79,7 +74,10 @@ import {
 } from "../src/request-handler.js";
 
 // 构造一个可推送 data/end/error 事件的伪 body
-function createFakeBody(chunks: Buffer[] = [], opts: { error?: Error; delay?: number } = {}) {
+function createFakeBody(
+  chunks: Buffer[] = [],
+  opts: { error?: Error; delay?: number } = {},
+) {
   const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
   const body = {
     on(event: string, listener: (...args: unknown[]) => void) {
@@ -161,7 +159,10 @@ describe("Request Handler Extras - getProxyAgent 池管理", () => {
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
 
     // 触发 101 次以超过 100 上限
-    await sendProxyRequest(request, { maxProxyAttempts: 101, useFallback: false });
+    await sendProxyRequest(request, {
+      maxProxyAttempts: 101,
+      useFallback: false,
+    });
 
     // ProxyAgent 应被创建 101 次
     expect(undiciMock.ProxyAgent).toHaveBeenCalledTimes(101);
@@ -175,8 +176,14 @@ describe("Request Handler Extras - getProxyAgent 池管理", () => {
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
 
     // 两次请求同一个 proxy URL，应只创建一次 ProxyAgent
-    await sendProxyRequest(request, { maxProxyAttempts: 1, useFallback: false });
-    await sendProxyRequest(request, { maxProxyAttempts: 1, useFallback: false });
+    await sendProxyRequest(request, {
+      maxProxyAttempts: 1,
+      useFallback: false,
+    });
+    await sendProxyRequest(request, {
+      maxProxyAttempts: 1,
+      useFallback: false,
+    });
 
     expect(undiciMock.ProxyAgent).toHaveBeenCalledTimes(1);
   });
@@ -187,12 +194,18 @@ describe("Request Handler Extras - getProxyAgent 池管理", () => {
     undiciMock.request.mockRejectedValue(new Error("fail"));
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
-    await sendProxyRequest(request, { maxProxyAttempts: 1, useFallback: false });
+    await sendProxyRequest(request, {
+      maxProxyAttempts: 1,
+      useFallback: false,
+    });
     expect(undiciMock.ProxyAgent).toHaveBeenCalledTimes(1);
 
     closeAllProxyAgents();
 
-    await sendProxyRequest(request, { maxProxyAttempts: 1, useFallback: false });
+    await sendProxyRequest(request, {
+      maxProxyAttempts: 1,
+      useFallback: false,
+    });
     expect(undiciMock.ProxyAgent).toHaveBeenCalledTimes(2);
   });
 });
@@ -201,13 +214,13 @@ describe("Request Handler Extras - filterDangerousHeaders 补充分支", () => {
   it("应过滤 Keep-Alive / Upgrade / TE / Trailer / Proxy-* / Via / If-* / Front-End-Https 等", () => {
     const headers = {
       "Keep-Alive": "timeout=5",
-      "Upgrade": "websocket",
-      "TE": "trailers",
-      "Trailer": "x-trailer",
+      Upgrade: "websocket",
+      TE: "trailers",
+      Trailer: "x-trailer",
       "Proxy-Authorization": "Basic abc",
       "Proxy-Connection": "keep-alive",
       "Proxy-Authenticate": "Basic",
-      "Via": "1.1 proxy",
+      Via: "1.1 proxy",
       "X-Forwarded-Host": "evil.com",
       "X-Forwarded-Proto": "https",
       "X-Real-IP": "1.2.3.4",
@@ -475,7 +488,9 @@ describe("Request Handler Extras - ensureUserAgent 行为", () => {
   });
 
   it("无 UA 时应通过 ensureUserAgent 添加随机 UA（直连路径）", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("ok", { status: 200 }));
     global.fetch = fetchMock as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
@@ -488,7 +503,9 @@ describe("Request Handler Extras - ensureUserAgent 行为", () => {
   });
 
   it("已有 UA（任意大小写）时不应覆盖", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("ok", { status: 200 }));
     global.fetch = fetchMock as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = {
@@ -519,7 +536,11 @@ describe("Request Handler Extras - sendRequestDirect 分支", () => {
   });
 
   it("fetch 失败时应返回 success:false + error", async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error("network down")) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockRejectedValue(
+        new Error("network down"),
+      ) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendProxyRequest(request, { useFallback: true });
@@ -550,9 +571,11 @@ describe("Request Handler Extras - sendRequestDirect 分支", () => {
         controller.error(new Error("stream read failed"));
       },
     });
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response(stream, { status: 200 }),
-    ) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(stream, { status: 200 }),
+      ) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendProxyRequest(request, { useFallback: true });
@@ -565,7 +588,9 @@ describe("Request Handler Extras - sendRequestDirect 分支", () => {
     // 204 No Content 响应 body 为 null
     // readWebBodyWithLimit 对 null body 直接返回空字符串
     const resp = new Response(null, { status: 204 });
-    global.fetch = vi.fn().mockResolvedValue(resp) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(resp) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendProxyRequest(request, { useFallback: true });
@@ -586,7 +611,9 @@ describe("Request Handler Extras - sendRequestDirect 分支", () => {
       },
     });
     const resp = new Response(stream, { status: 200 });
-    global.fetch = vi.fn().mockResolvedValue(resp) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(resp) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendProxyRequest(request, { useFallback: true });
@@ -609,7 +636,11 @@ describe("Request Handler Extras - sendProxyRequest 分支", () => {
 
   it("无可用代理且 useFallback=true 时应 Fallback 直连", async () => {
     proxyManagerMock.getAvailableProxy.mockResolvedValue(null);
-    global.fetch = vi.fn().mockResolvedValue(new Response("ok", { status: 200 })) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("ok", { status: 200 }),
+      ) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendProxyRequest(request, { useFallback: true });
@@ -635,7 +666,11 @@ describe("Request Handler Extras - sendProxyRequest 分支", () => {
     proxyManagerMock.getAvailableProxy.mockResolvedValue(fakeProxy);
     proxyManagerMock.reportProxyFailed.mockResolvedValue(undefined);
     undiciMock.request.mockRejectedValue(new Error("proxy fail"));
-    global.fetch = vi.fn().mockResolvedValue(new Response("direct ok", { status: 200 })) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("direct ok", { status: 200 }),
+      ) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendProxyRequest(request, {
@@ -669,7 +704,11 @@ describe("Request Handler Extras - sendProxyRequest 分支", () => {
     proxyManagerMock.getAvailableProxy.mockResolvedValue(fakeProxy);
     proxyManagerMock.reportProxyFailed.mockResolvedValue(undefined);
     undiciMock.request.mockRejectedValue(new Error("proxy fail"));
-    global.fetch = vi.fn().mockResolvedValue(new Response("ok", { status: 200 })) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("ok", { status: 200 }),
+      ) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendProxyRequest(request, {
@@ -708,7 +747,11 @@ describe("Request Handler Extras - sendProxyRequest 分支", () => {
 
   it("直连失败且 useFallback=true 时应返回合并错误", async () => {
     proxyManagerMock.getAvailableProxy.mockResolvedValue(null);
-    global.fetch = vi.fn().mockRejectedValue(new Error("direct fail")) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockRejectedValue(
+        new Error("direct fail"),
+      ) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendProxyRequest(request, { useFallback: true });
@@ -776,9 +819,11 @@ describe("Request Handler Extras - sendRequestWithMultipleProxies 竞速成功�
   it("竞速全部失败但 useFallback=true 时应回退到直连", async () => {
     proxyManagerMock.getMultipleProxies.mockResolvedValue([fakeProxy]);
     undiciMock.request.mockRejectedValue(new Error("all proxies failed"));
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response("direct-ok", { status: 200 }),
-    ) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("direct-ok", { status: 200 }),
+      ) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendRequestWithMultipleProxies(request, 1, true);
@@ -803,9 +848,11 @@ describe("Request Handler Extras - sendRequestWithMultipleProxies 竞速成功�
 
   it("无可用代理且 useFallback=true 时应回退到直连", async () => {
     proxyManagerMock.getMultipleProxies.mockResolvedValue([]);
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response("direct-ok", { status: 200 }),
-    ) as unknown as typeof globalThis.fetch;
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("direct-ok", { status: 200 }),
+      ) as unknown as typeof globalThis.fetch;
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendRequestWithMultipleProxies(request, 3, true);
@@ -852,14 +899,12 @@ describe("Request Handler Extras - sendRequestWithMultipleProxies 竞速成功�
     // 第一个代理抛 AbortError（被取消），第二个成功
     const abortErr = new Error("The operation was aborted");
     abortErr.name = "AbortError";
-    undiciMock.request
-      .mockRejectedValueOnce(abortErr)
-      .mockResolvedValueOnce(
-        createFakeResponse({
-          statusCode: 200,
-          body: createFakeBody([Buffer.from("second-wins")]),
-        }),
-      );
+    undiciMock.request.mockRejectedValueOnce(abortErr).mockResolvedValueOnce(
+      createFakeResponse({
+        statusCode: 200,
+        body: createFakeBody([Buffer.from("second-wins")]),
+      }),
+    );
 
     const request: ProxyRequest = { url: "http://example.com", method: "GET" };
     const result = await sendRequestWithMultipleProxies(request, 2, false);
@@ -897,10 +942,21 @@ describe("Request Handler Extras - sendRequestWithMultipleProxies 竞速成功�
 });
 
 describe("sendRequestDirectPinned - SSRF TOCTOU 防护 pinned DNS 路径（覆盖 line 605-676）", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     // 无可用代理 → 跳过代理循环 → 走 fallback 直连
     proxyManagerMock.getAvailableProxy.mockResolvedValue(null);
+    // sendRequestDirect 在 pinned 失败后会回退标准 fetch（Bug 1 修复：保生产可用性）。
+    // mock 标准 fetch 也失败，使 pinned 错误用例验证"pinned 失败 + 回退失败 → 整体 success:false"。
+    fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("fetch fallback failed"));
+  });
+
+  afterEach(() => {
+    fetchSpy?.mockRestore();
   });
 
   it("resolvedIp 存在时应走 pinned DNS 直连并返回 200 响应", async () => {

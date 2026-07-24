@@ -5,7 +5,7 @@
 
 /**
  * 网页捕获模块 - 核心捕获服务
- * 
+ *
  * 功能：
  * - 接收捕获请求
  * - 协调浏览器池和资源处理器
@@ -13,23 +13,28 @@
  * - 处理动态内容、懒加载等
  */
 
-import type { Page } from 'puppeteer';
-import type { CaptureOptions, CaptureResult, CaptureMode, ArticleResult } from './types.js';
-import { mergeCaptureOptions, SCROLL_CONFIG } from './config.js';
-import { BrowserPool, getBrowserPool } from './browser-pool.js';
-import { createResourceProcessor } from './resource-processor.js';
-import { extractArticle } from './article-extractor.js';
-import { logger } from '../logger.js';
-import { request as undiciRequest } from 'undici';
-import { createPinnedAgent } from '../utils/pinned-agent.js';
+import type { Page } from "puppeteer";
+import type {
+  CaptureOptions,
+  CaptureResult,
+  CaptureMode,
+  ArticleResult,
+} from "./types.js";
+import { mergeCaptureOptions, SCROLL_CONFIG } from "./config.js";
+import { BrowserPool, getBrowserPool } from "./browser-pool.js";
+import { createResourceProcessor } from "./resource-processor.js";
+import { extractArticle } from "./article-extractor.js";
+import { logger } from "../logger.js";
+import { request as undiciRequest } from "undici";
+import { createPinnedAgent } from "../utils/pinned-agent.js";
 import {
   readUndiciBodyWithLimit,
   readWebBodyWithLimit,
   type UndiciBodyLike,
-} from '../utils/body-reader.js';
-import { SECURITY_CONFIG } from '../config.js';
-import { validateUrl } from '../security.js';
-import { isIP as netIsIP } from 'node:net';
+} from "../utils/body-reader.js";
+import { SECURITY_CONFIG } from "../config.js";
+import { validateUrl } from "../security.js";
+import { isIP as netIsIP } from "node:net";
 
 /**
  * 降级 fetch 响应体最大字节数
@@ -54,7 +59,10 @@ export class CaptureService {
   /**
    * 捕获网页
    */
-  public async capture(url: string, options?: CaptureOptions): Promise<CaptureResult> {
+  public async capture(
+    url: string,
+    options?: CaptureOptions,
+  ): Promise<CaptureResult> {
     const startTime = Date.now();
     const mergedOptions = mergeCaptureOptions(options);
     const mode: CaptureMode = mergedOptions.mode;
@@ -63,7 +71,7 @@ export class CaptureService {
     const urlValidation = validateUrl(url);
     if (!urlValidation.valid) {
       logger.warn(`URL validation failed: ${urlValidation.error}`, {
-        module: 'CaptureService',
+        module: "CaptureService",
         url,
       });
       return {
@@ -76,9 +84,9 @@ export class CaptureService {
     }
 
     logger.info(`Starting capture: ${url}`, {
-      module: 'CaptureService',
+      module: "CaptureService",
       mode,
-      url
+      url,
     });
 
     let page: Page | null = null;
@@ -95,7 +103,7 @@ export class CaptureService {
 
       await this.waitForPageReady(page, mergedOptions);
 
-      if (mergedOptions.scrollToEnd && mode === 'full') {
+      if (mergedOptions.scrollToEnd && mode === "full") {
         await this.scrollToEnd(page);
       }
 
@@ -105,7 +113,7 @@ export class CaptureService {
 
       let html: string;
 
-      if (mode === 'full') {
+      if (mode === "full") {
         const resourceProcessor = createResourceProcessor(mergedOptions);
         html = await resourceProcessor.processResources(page);
       } else {
@@ -118,17 +126,22 @@ export class CaptureService {
       let article: ArticleResult | undefined;
       if (mergedOptions.extractArticle) {
         try {
-          logger.info(`Extracting article content`, { module: 'CaptureService', url });
+          logger.info(`Extracting article content`, {
+            module: "CaptureService",
+            url,
+          });
           article = await extractArticle(html, finalUrl);
         } catch (articleError) {
-          logger.warn(`Failed to extract article: ${articleError}`, { module: 'CaptureService' });
+          logger.warn(`Failed to extract article: ${articleError}`, {
+            module: "CaptureService",
+          });
         }
       }
 
       const duration = Date.now() - startTime;
 
       logger.info(`Capture complete: ${url}`, {
-        module: 'CaptureService',
+        module: "CaptureService",
         duration,
         mode,
         articleExtracted: !!article,
@@ -146,22 +159,32 @@ export class CaptureService {
       };
     } catch (error) {
       const duration = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
 
-      logger.error(`Capture failed: ${url}`, error instanceof Error ? error : undefined, {
-        module: 'CaptureService',
-        duration
-      });
+      logger.error(
+        `Capture failed: ${url}`,
+        error instanceof Error ? error : undefined,
+        {
+          module: "CaptureService",
+          duration,
+        },
+      );
 
       // 降级路径：仅 HTML 模式可降级为 fetch（无 JS 渲染）
       // full 模式需要资源内联，无法降级
-      if (mode === 'html') {
+      if (mode === "html") {
         logger.warn(`Browser unavailable, falling back to fetch: ${url}`, {
-          module: 'CaptureService',
+          module: "CaptureService",
           originalError: errorMessage,
         });
 
-        return await this.captureWithFetch(url, mergedOptions, errorMessage, startTime);
+        return await this.captureWithFetch(
+          url,
+          mergedOptions,
+          errorMessage,
+          startTime,
+        );
       }
 
       return {
@@ -197,50 +220,71 @@ export class CaptureService {
     startTime: number,
   ): Promise<CaptureResult> {
     try {
-      // SSRF TOCTOU 防护：仅当 resolvedIp 是有效 IP 地址时才使用 pinned DNS
-      const isValidIp = typeof netIsIP === 'function' && netIsIP(options.resolvedIp) !== 0;
+      // SSRF TOCTOU 防护：仅当 resolvedIp 是有效 IP 地址时才使用 pinned DNS；失败则回退标准 fetch
+      const isValidIp =
+        typeof netIsIP === "function" && netIsIP(options.resolvedIp) !== 0;
       if (options.resolvedIp && isValidIp) {
-        return await this.captureWithFetchPinned(url, options, browserError, startTime);
-      }
-
-      // resolvedIp 无效或未提供时，走标准 fetch 路径（向后兼容）
-      if (options.resolvedIp && !isValidIp) {
-        logger.warn(`resolvedIp 值无效（${options.resolvedIp}），回退到标准 fetch 路径`, {
-          module: 'CaptureService',
+        const pinnedResult = await this.captureWithFetchPinned(
           url,
-        });
+          options,
+          browserError,
+          startTime,
+        );
+        if (pinnedResult.success) {
+          return pinnedResult;
+        }
+        // pinned 失败：回退标准 fetch（可用性兜底）
+        logger.warn(
+          `pinned fetch 降级失败，回退标准 fetch: ${pinnedResult.error}`,
+          {
+            module: "CaptureService",
+            url,
+          },
+        );
+      } else if (options.resolvedIp && !isValidIp) {
+        // resolvedIp 无效时，走标准 fetch 路径（向后兼容）
+        logger.warn(
+          `resolvedIp 值无效（${options.resolvedIp}），使用标准 fetch 路径`,
+          {
+            module: "CaptureService",
+            url,
+          },
+        );
       }
 
       const response = await fetch(url, {
-        method: 'GET',
+        method: "GET",
         headers: {
-          'User-Agent': options.userAgent,
-          Accept: 'text/html,application/xhtml+xml',
+          "User-Agent": options.userAgent,
+          Accept: "text/html,application/xhtml+xml",
         },
-        redirect: 'follow',
+        redirect: "follow",
       });
 
       if (!response.ok) {
         const duration = Date.now() - startTime;
         const fetchError = `Fetch fallback failed: HTTP ${response.status}`;
-        logger.warn(fetchError, { module: 'CaptureService', url });
+        logger.warn(fetchError, { module: "CaptureService", url });
 
         return {
           success: false,
           error: `Browser: ${browserError}; Fetch: HTTP ${response.status}`,
           url,
-          mode: 'html',
+          mode: "html",
           duration,
         };
       }
 
-      const html = await readWebBodyWithLimit(response.body, MAX_FETCH_RESPONSE_SIZE);
+      const html = await readWebBodyWithLimit(
+        response.body,
+        MAX_FETCH_RESPONSE_SIZE,
+      );
       const title = this.extractTitleFromHtml(html);
       const finalUrl = response.url || url;
       const duration = Date.now() - startTime;
 
       logger.info(`Fetch fallback completed: ${url}`, {
-        module: 'CaptureService',
+        module: "CaptureService",
         duration,
         htmlLength: html.length,
       });
@@ -250,24 +294,29 @@ export class CaptureService {
         html,
         title,
         url: finalUrl,
-        mode: 'html',
+        mode: "html",
         degraded: true,
         capturedAt: new Date().toISOString(),
         duration,
       };
     } catch (fetchError) {
       const duration = Date.now() - startTime;
-      const fetchErrorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      const fetchErrorMessage =
+        fetchError instanceof Error ? fetchError.message : String(fetchError);
 
-      logger.error(`Fetch fallback failed: ${url}`, fetchError instanceof Error ? fetchError : undefined, {
-        module: 'CaptureService',
-      });
+      logger.error(
+        `Fetch fallback failed: ${url}`,
+        fetchError instanceof Error ? fetchError : undefined,
+        {
+          module: "CaptureService",
+        },
+      );
 
       return {
         success: false,
         error: `Browser: ${browserError}; Fetch: ${fetchErrorMessage}`,
         url,
-        mode: 'html',
+        mode: "html",
         duration,
       };
     }
@@ -286,7 +335,7 @@ export class CaptureService {
     startTime: number,
   ): Promise<CaptureResult> {
     logger.debug(`使用 pinned DNS fetch 降级: ${options.resolvedIp}`, {
-      module: 'CaptureService',
+      module: "CaptureService",
       url,
     });
 
@@ -296,10 +345,10 @@ export class CaptureService {
 
     try {
       const response = await undiciRequest(url, {
-        method: 'GET',
+        method: "GET",
         headers: {
-          'User-Agent': options.userAgent,
-          Accept: 'text/html,application/xhtml+xml',
+          "User-Agent": options.userAgent,
+          Accept: "text/html,application/xhtml+xml",
         },
         dispatcher: agent,
         maxRedirections: 5,
@@ -308,13 +357,13 @@ export class CaptureService {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         const duration = Date.now() - startTime;
         const fetchError = `Fetch fallback failed: HTTP ${response.statusCode}`;
-        logger.warn(fetchError, { module: 'CaptureService', url });
+        logger.warn(fetchError, { module: "CaptureService", url });
 
         return {
           success: false,
           error: `Browser: ${browserError}; Fetch: HTTP ${response.statusCode}`,
           url,
-          mode: 'html',
+          mode: "html",
           duration,
         };
       }
@@ -327,7 +376,7 @@ export class CaptureService {
       const duration = Date.now() - startTime;
 
       logger.info(`Pinned fetch fallback completed: ${url}`, {
-        module: 'CaptureService',
+        module: "CaptureService",
         duration,
         htmlLength: html.length,
       });
@@ -337,24 +386,29 @@ export class CaptureService {
         html,
         title,
         url,
-        mode: 'html',
+        mode: "html",
         degraded: true,
         capturedAt: new Date().toISOString(),
         duration,
       };
     } catch (fetchError) {
       const duration = Date.now() - startTime;
-      const fetchErrorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      const fetchErrorMessage =
+        fetchError instanceof Error ? fetchError.message : String(fetchError);
 
-      logger.error(`Pinned fetch fallback failed: ${url}`, fetchError instanceof Error ? fetchError : undefined, {
-        module: 'CaptureService',
-      });
+      logger.error(
+        `Pinned fetch fallback failed: ${url}`,
+        fetchError instanceof Error ? fetchError : undefined,
+        {
+          module: "CaptureService",
+        },
+      );
 
       return {
         success: false,
         error: `Browser: ${browserError}; Fetch: ${fetchErrorMessage}`,
         url,
-        mode: 'html',
+        mode: "html",
         duration,
       };
     } finally {
@@ -365,7 +419,7 @@ export class CaptureService {
       } catch (err) {
         logger.debug(
           `关闭 pinned Agent 时出错: ${err instanceof Error ? err.message : String(err)}`,
-          { module: 'CaptureService' },
+          { module: "CaptureService" },
         );
       }
     }
@@ -376,7 +430,7 @@ export class CaptureService {
    */
   private extractTitleFromHtml(html: string): string {
     const match = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-    return match?.[1]?.trim() ?? '';
+    return match?.[1]?.trim() ?? "";
   }
 
   /**
@@ -384,7 +438,10 @@ export class CaptureService {
    * 职责：设置 viewport / timeout / UA（per-capture 配置）
    * BrowserPool.configurePage 已注入 stealth 脚本（基础设施层），此处不重复
    */
-  private async configurePage(page: Page, options: Required<CaptureOptions>): Promise<void> {
+  private async configurePage(
+    page: Page,
+    options: Required<CaptureOptions>,
+  ): Promise<void> {
     await page.setViewport(options.viewport);
     page.setDefaultTimeout(options.timeout);
     page.setDefaultNavigationTimeout(options.timeout);
@@ -398,21 +455,24 @@ export class CaptureService {
   private async navigateToPage(
     page: Page,
     url: string,
-    options: Required<CaptureOptions>
+    options: Required<CaptureOptions>,
   ): Promise<void> {
     try {
       await page.goto(url, {
-        waitUntil: 'networkidle2',
+        waitUntil: "networkidle2",
         timeout: options.timeout,
       });
     } catch (error) {
-      if (error instanceof Error && error.message.includes('net::ERR_')) {
-        logger.warn('Network error during navigation, trying without networkidle', {
-          module: 'CaptureService',
-          url
-        });
+      if (error instanceof Error && error.message.includes("net::ERR_")) {
+        logger.warn(
+          "Network error during navigation, trying without networkidle",
+          {
+            module: "CaptureService",
+            url,
+          },
+        );
         await page.goto(url, {
-          waitUntil: 'domcontentloaded',
+          waitUntil: "domcontentloaded",
           timeout: options.timeout,
         });
       }
@@ -425,7 +485,7 @@ export class CaptureService {
    */
   private async waitForPageReady(
     page: Page,
-    options: Required<CaptureOptions>
+    options: Required<CaptureOptions>,
   ): Promise<void> {
     if (options.waitForSelector) {
       try {
@@ -433,20 +493,20 @@ export class CaptureService {
           timeout: options.timeout,
         });
       } catch {
-        logger.warn('Wait for selector timeout', {
-          module: 'CaptureService',
-          selector: options.waitForSelector
+        logger.warn("Wait for selector timeout", {
+          module: "CaptureService",
+          selector: options.waitForSelector,
         });
       }
     }
 
     await page.evaluate(() => {
       return new Promise<void>((resolve) => {
-        if (document.readyState === 'complete') {
+        if (document.readyState === "complete") {
           resolve();
           return;
         }
-        window.addEventListener('load', () => resolve());
+        window.addEventListener("load", () => resolve());
       });
     });
   }
@@ -455,14 +515,16 @@ export class CaptureService {
    * 滚动到页面底部触发懒加载
    */
   private async scrollToEnd(page: Page): Promise<void> {
-    logger.debug('Scrolling to end of page', { module: 'CaptureService' });
+    logger.debug("Scrolling to end of page", { module: "CaptureService" });
 
     let scrollCount = 0;
     let lastHeight = 0;
     const viewportHeight = SCROLL_CONFIG.scrollStep;
 
     while (scrollCount < SCROLL_CONFIG.maxScrolls) {
-      const currentHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+      const currentHeight = await page.evaluate(
+        () => document.documentElement.scrollHeight,
+      );
 
       if (currentHeight === lastHeight) {
         break;
@@ -490,7 +552,7 @@ export class CaptureService {
     try {
       return await page.title();
     } catch {
-      return '';
+      return "";
     }
   }
 
@@ -526,7 +588,7 @@ export function getCaptureService(): CaptureService {
  */
 export async function captureWebpage(
   url: string,
-  options?: CaptureOptions
+  options?: CaptureOptions,
 ): Promise<CaptureResult> {
   const service = getCaptureService();
   return service.capture(url, options);

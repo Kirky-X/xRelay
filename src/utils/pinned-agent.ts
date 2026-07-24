@@ -14,6 +14,7 @@
  */
 
 import { Agent } from "undici";
+import { isIP as netIsIP } from "node:net";
 
 /**
  * Pinned DNS lookup 函数签名（兼容 Node.js dns.lookup 调用约定）
@@ -25,7 +26,11 @@ import { Agent } from "undici";
 export type PinnedLookupFunc = (
   hostname: string,
   options: unknown,
-  callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
+  callback: (
+    err: NodeJS.ErrnoException | null,
+    address: string,
+    family: number,
+  ) => void,
 ) => void;
 
 /**
@@ -38,8 +43,26 @@ export function createPinnedLookup(resolvedIp: string): PinnedLookupFunc {
   return (
     _hostname: string,
     _options: unknown,
-    callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
+    callback: (
+      err: NodeJS.ErrnoException | null,
+      address: string,
+      family: number,
+    ) => void,
   ): void => {
+    // 防御性校验：resolvedIp 必须是有效 IP 地址。
+    // 生产环境曾出现 resolvedIp 为 undefined 导致 node:net 抛 "Invalid IP address: undefined"
+    // （DoH 解析路径下偶发透传异常，本地系统 DNS 路径无法复现）。
+    // 无效时通过 callback 返回错误，由上层捕获并回退标准 fetch（规则12：失败显性化）。
+    if (typeof resolvedIp !== "string" || netIsIP(resolvedIp) === 0) {
+      callback(
+        new TypeError(
+          `Invalid resolvedIp for pinned DNS lookup: ${String(resolvedIp)}`,
+        ),
+        "",
+        4,
+      );
+      return;
+    }
     // family 4 = IPv4, 6 = IPv6；根据 IP 格式判断
     const family = resolvedIp.includes(":") ? 6 : 4;
     callback(null, resolvedIp, family);
@@ -65,7 +88,9 @@ export function createPinnedAgent(resolvedIp: string): Agent {
       lookup: pinnedLookup as unknown as NonNullable<
         NonNullable<ConstructorParameters<typeof Agent>[0]>["connect"]
       > extends infer Conn
-        ? Conn extends { lookup?: infer L } ? L : never
+        ? Conn extends { lookup?: infer L }
+          ? L
+          : never
         : never,
     },
   });

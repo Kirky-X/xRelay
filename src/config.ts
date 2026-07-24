@@ -127,6 +127,14 @@ export const SECURITY_CONFIG = {
 };
 
 /**
+ * 应用版本号（与 package.json version 保持手动同步）
+ *
+ * 单一来源原则：health 端点、日志 context 等统一引用此常量，
+ * 避免多处硬编码导致版本漂移（曾出现 health 返回 0.2.0 而 package.json 已 0.2.2）。
+ */
+export const APP_VERSION = "0.2.2";
+
+/**
  * 检查是否为生产环境
  */
 export function isProduction(): boolean {
@@ -161,7 +169,10 @@ export const CORS_CONFIG = {
  * - standalone.ts（独立部署）：验证失败时记录错误并 exit(1)
  * - Vercel Edge：函数即起即停，不阻止启动但记录错误日志
  */
-export function validateProductionConfig(): { valid: boolean; errors: string[] } {
+export function validateProductionConfig(): {
+  valid: boolean;
+  errors: string[];
+} {
   const errors: string[] = [];
 
   if (isProduction()) {
@@ -177,17 +188,23 @@ export function validateProductionConfig(): { valid: boolean; errors: string[] }
 
     // 生产环境必须配置 CRON_SECRET，防止未授权触发清理任务
     if (!process.env.CRON_SECRET || process.env.CRON_SECRET.trim() === "") {
-      errors.push("CRON_SECRET environment variable must be set in production to protect cron endpoints");
+      errors.push(
+        "CRON_SECRET environment variable must be set in production to protect cron endpoints",
+      );
     }
 
     // 生产环境建议显式配置 CORS_ORIGINS（不依赖硬编码默认值）
     if (!process.env.CORS_ORIGINS || process.env.CORS_ORIGINS.trim() === "") {
-      errors.push("CORS_ORIGINS environment variable must be set in production to lock down allowed origins");
+      errors.push(
+        "CORS_ORIGINS environment variable must be set in production to lock down allowed origins",
+      );
     }
 
     // 生产环境应关闭详细日志
     if (process.env.ENABLE_VERBOSE_LOGGING === "true") {
-      console.warn("[Config] WARNING: Verbose logging is enabled in production");
+      console.warn(
+        "[Config] WARNING: Verbose logging is enabled in production",
+      );
     }
   }
 
