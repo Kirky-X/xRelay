@@ -1,11 +1,11 @@
 <div align="center">
-<img src="docs/asset/xRelay.png" alt="xRelay Logo" high="180" />
+<img src="docs/assets/xRelay.png" alt="xRelay Logo" height="180" />
 
 # xRelay
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)](https://www.typescriptlang.org/) [![Tests](https://img.shields.io/badge/Tests-28%20passing-green.svg)](https://github.com/your-repo/xRelay) [![Version](https://img.shields.io/badge/version-0.1.2-orange.svg)](https://github.com/your-repo/xRelay)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)](https://www.typescriptlang.org/) [![Tests](https://img.shields.io/github/actions/workflow/status/Kirky-X/xRelay/ci.yml?branch=main&label=Tests)](https://github.com/Kirky-X/xRelay/actions/workflows/ci.yml) [![Version](https://img.shields.io/github/v/release/Kirky-X/xRelay)](https://github.com/Kirky-X/xRelay/releases) [![Coverage](https://img.shields.io/badge/Coverage-92.93%25-brightgreen)](https://github.com/Kirky-X/xRelay)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fyour-repo%2FxRelay)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FKirky-X%2FxRelay)
 
 在 Vercel 部署的免费代理转发服务，支持免费代理池 + Fallback 直连。
 
@@ -50,7 +50,15 @@
 | ENABLE_CACHE | 否 | 启用响应缓存 | true |
 | ENABLE_RATE_LIMIT | 否 | 启用请求限流 | true |
 | ENABLE_FALLBACK | 否 | 启用 Fallback 直连 | true |
-| CRON_SECRET | 否 | Cron 端点认证密钥（生产环境建议设置） | - |
+| CORS_ORIGINS | 是（生产） | 允许的跨域来源（逗号分隔） | 开发默认白名单 |
+| CRON_SECRET | 是（生产） | Cron 端点认证密钥 | - |
+| HOST | 否 | 独立部署监听地址 | 127.0.0.1 |
+| PORT | 否 | 独立部署监听端口 | 3000 |
+| CHROME_PATH | 否 | Puppeteer 可执行文件路径 | 自动检测 |
+| KV_REST_API_URL | 否 | Vercel KV 地址（分布式存储） | - |
+| KV_REST_API_TOKEN | 否 | Vercel KV 访问令牌 | - |
+
+> **生产环境强制校验**：`CORS_ORIGINS` 与 `CRON_SECRET` 在生产环境必须显式配置，否则启动时记录配置错误日志。详见 `src/config.ts` 的 `validateProductionConfig`。
 
 ### 使用示例
 
@@ -99,7 +107,8 @@ console.log(result);
 | `/api` | POST | 代理请求 |
 | `/api/capture` | POST | 网页捕获 |
 | `/api/health` | GET | 健康检查 |
-| `/api/ready` | GET | 就绪检查 |
+| `/api/ready` | GET | 就绪检查（与 health 同义，返回 healthy） |
+| `/api/cron/cleanup` | GET | 定时清理废弃代理（需 `CRON_SECRET`） |
 
 ### 代理请求 POST /api
 
@@ -165,7 +174,7 @@ console.log(result);
 
 ### 网页捕获 POST /api/capture
 
-捕获网页的 HTML 内容、截图或提取文章。
+捕获网页的 HTML 内容（支持 JS 渲染）或提取文章正文。
 
 **请求格式：**
 
@@ -174,11 +183,20 @@ console.log(result);
   "url": "https://example.com",
   "options": {
     "mode": "html",
-    "waitFor": 1000,
+    "extractArticle": false,
+    "waitTime": 1000,
+    "waitForSelector": "#content",
+    "scrollToEnd": false,
+    "timeout": 30000,
+    "userAgent": "Mozilla/5.0 ...",
     "viewport": {
       "width": 1920,
       "height": 1080
-    }
+    },
+    "removeScripts": false,
+    "removeComments": false,
+    "preserveLinks": false,
+    "processIframes": false
   }
 }
 ```
@@ -186,9 +204,20 @@ console.log(result);
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | url | 是 | 目标 URL |
-| options.mode | 否 | 模式：html/screenshot/article，默认 html |
-| options.waitFor | 否 | 等待时间（毫秒）|
+| options.mode | 否 | 捕获模式：`html`（仅 HTML，快速）/ `full`（完整网页，资源内联为 Data URI），默认 `html` |
+| options.extractArticle | 否 | 是否启用文章解析（使用 article-extractor），默认 false |
+| options.waitTime | 否 | 额外等待时间（毫秒），用于动态内容加载 |
+| options.waitForSelector | 否 | 等待特定选择器出现 |
+| options.scrollToEnd | 否 | 是否滚动到底部触发懒加载（仅 full 模式） |
+| options.timeout | 否 | 总超时时间（毫秒），默认 30000 |
+| options.userAgent | 否 | 自定义 User-Agent（未指定则随机轮换） |
 | options.viewport | 否 | 视口大小 |
+| options.removeScripts | 否 | 是否移除脚本标签（仅 full 模式） |
+| options.removeComments | 否 | 是否移除 HTML 注释 |
+| options.preserveLinks | 否 | 是否保留链接原始 href（仅 full 模式） |
+| options.processIframes | 否 | 是否处理 iframe 内容（仅 full 模式） |
+
+> **降级策略**：浏览器不可用时，`html` 模式自动降级为 fetch 直接获取静态 HTML（不渲染 JS）。`full` 模式无法降级。降级响应中 `degraded: true`。
 
 **响应格式：**
 
@@ -200,7 +229,21 @@ console.log(result);
     "title": "Example",
     "url": "https://example.com",
     "mode": "html",
-    "resources": [],
+    "degraded": false,
+    "resources": {
+      "images": 5,
+      "styles": 2,
+      "scripts": 3,
+      "fonts": 0,
+      "iframes": 0,
+      "others": 1
+    },
+    "article": {
+      "success": true,
+      "title": "...",
+      "content": "...",
+      "textContent": "..."
+    },
     "capturedAt": "2026-03-15T12:00:00Z",
     "duration": 1500
   },
@@ -208,6 +251,8 @@ console.log(result);
   "duration": 1500
 }
 ```
+
+> `resources` 仅 `full` 模式返回；`article` 仅 `extractArticle: true` 时返回。
 
 ### 健康检查 GET /api/health
 
@@ -219,7 +264,7 @@ console.log(result);
 {
   "status": "healthy",
   "timestamp": "2026-03-15T12:00:00Z",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "uptime": 3600,
   "requestId": "abc123"
 }
@@ -227,15 +272,15 @@ console.log(result);
 
 ## 配置说明
 
-默认配置（见 `src/config.ts`）：
+默认配置（见 `src/config.ts` 与 `src/middleware/rate-limit.ts`）：
 
 - **代理池刷新间隔**: 5 分钟
 - **最大代理尝试次数**: 3 次
 - **代理请求超时**: 8 秒
 - **直连请求超时**: 10 秒
 - **缓存时间**: 5 分钟
-- **全局限流**: 每分钟 100 次（无效 IP 限流 10 次）
-- **IP 限流**: 每分钟 5 次（无效 IP 限流 0 次）
+- **代理端点限流**: 每分钟 100 次（未知/无效 IP 降为 10 次/分）
+- **捕获端点限流**: 每分钟 30 次（未知/无效 IP 降为 3 次/分）
 - **每次请求选取代理数**: 5 个
 
 ### 数据库配置（可选）
@@ -310,11 +355,10 @@ xRelay/
 │   │   └── request-validator.ts
 │   ├── security.ts           # SSRF 防护（DNS 验证、IP 黑白名单）
 │   ├── database/             # 数据库模块
-│   │   ├── connection.ts     # 数据库连接
+│   │   ├── connection.ts     # 数据库连接（SCHEMA_SQL 内联）
 │   │   ├── available-proxies-dao.ts
 │   │   ├── deprecated-proxies-dao.ts
 │   │   ├── cleanup.ts        # 自动清理
-│   │   ├── schema.sql
 │   │   └── index.ts
 │   ├── cache/                # 缓存模块
 │   │   └── advanced-cache.ts # LRU 内存缓存

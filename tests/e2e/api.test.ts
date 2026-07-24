@@ -162,7 +162,7 @@ describe("API 端到端测试", () => {
         status: "healthy",
       });
       expect((res.body as { timestamp: string }).timestamp).toBeDefined();
-      expect((res.body as { version: string }).version).toBe("0.1.2");
+      expect((res.body as { version: string }).version).toBe("0.2.0");
     });
 
     it("GET /api/health 应返回 200", async () => {

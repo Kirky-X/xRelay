@@ -147,6 +147,18 @@ export function validateIPv4Address(hostname: string): { valid: boolean; error?:
 
 /**
  * 验证 IPv6 地址是否为被阻止的私有地址
+ *
+ * 覆盖以下私有/内网/保留 IPv6 地址段：
+ * - :: (未指定地址)
+ * - ::1 (loopback)
+ * - fc00::/7 (唯一本地地址 ULA)
+ * - fe80::/10 (链路本地地址)
+ * - ff00::/8 (多播地址)
+ * - ::ffff:x.x.x.x (IPv4 映射地址，递归校验内嵌 IPv4)
+ * - ::x.x.x.x / 0:0:0:0:0:0:x.x.x.x (IPv4 兼容地址，递归校验内嵌 IPv4)
+ * - 2002:xxxx:xxxx::/16 (6to4 隧道，内嵌 IPv4 递归校验)
+ * - 64:ff9b::/96 (NAT64 well-known prefix，内嵌 IPv4 递归校验)
+ *
  * @param hostname 主机名（已标准化）
  * @returns 验证结果
  */
@@ -156,40 +168,148 @@ export function validateIPv6Address(hostname: string): { valid: boolean; error?:
   }
 
   // 移除方括号（URL 中的 IPv6 地址格式为 [::1]）
-  const ipv6Address = hostname.replace(/^\[|\]$/g, "");
+  // 统一小写以便前缀匹配大小写不敏感
+  const ipv6Address = hostname.replace(/^\[|\]$/g, "").toLowerCase();
 
   // :: (未指定地址)
   if (ipv6Address === "::" || ipv6Address === "::0") {
     return { valid: false, error: "Unspecified address not allowed" };
   }
 
-  // ::1 (loopback)
-  if (ipv6Address === "::1") {
+  // ::1 (loopback) - 也会匹配 0:0:0:0:0:0:0:1 等展开形式
+  if (ipv6Address === "::1" || ipv6Address === "0:0:0:0:0:0:0:1") {
     return { valid: false, error: "IPv6 loopback not allowed" };
   }
 
-  // fc00::/7 (private)
+  // fc00::/7 (private) - 匹配 fc/fd 开头
   if (ipv6Address.startsWith("fc") || ipv6Address.startsWith("fd")) {
     return { valid: false, error: "IPv6 private network not allowed" };
   }
 
-  // fe80::/10 (link-local)
-  if (
-    ipv6Address.startsWith("fe") &&
-    (ipv6Address[2] === "8" ||
-      ipv6Address[2] === "9" ||
-      ipv6Address[2] === "a" ||
-      ipv6Address[2] === "b")
-  ) {
+  // fe80::/10 (link-local) - 匹配 fe8/fe9/fea/feb 开头
+  if (/^fe[89ab]/.test(ipv6Address)) {
     return { valid: false, error: "IPv6 link-local not allowed" };
   }
 
   // ff00::/8 (multicast)
-  if (ipv6Address.toLowerCase().startsWith("ff")) {
+  if (ipv6Address.startsWith("ff")) {
     return { valid: false, error: "IPv6 multicast address not allowed" };
   }
 
+  // 2002::/16 (6to4 隧道) - 内嵌的 IPv4 地址可能是私有地址
+  // 格式: 2002:XXYY:ZZWW:: 其中 XX.XX.YY.ZZ.WW.WW 是内嵌 IPv4
+  // 实际格式: 2002:abcd:efgh:: 表示内嵌 IPv4 为 ab.cd.ef.gh
+  if (ipv6Address.startsWith("2002:")) {
+    const embeddedIpv4 = extractEmbeddedIPv4From6to4(ipv6Address);
+    if (embeddedIpv4) {
+      const ipv4Result = validateIPv4Address(embeddedIpv4);
+      if (!ipv4Result.valid) {
+        return { valid: false, error: `6to4 tunnel embeds blocked IPv4: ${ipv4Result.error}` };
+      }
+    }
+  }
+
+  // 64:ff9b::/96 (NAT64 well-known prefix) - 内嵌 IPv4 在最后 32 位
+  if (ipv6Address.startsWith("64:ff9b:") || ipv6Address.startsWith("64:ff9b::")) {
+    const embeddedIpv4 = extractEmbeddedIPv4FromNAT64(ipv6Address);
+    if (embeddedIpv4) {
+      const ipv4Result = validateIPv4Address(embeddedIpv4);
+      if (!ipv4Result.valid) {
+        return { valid: false, error: `NAT64 tunnel embeds blocked IPv4: ${ipv4Result.error}` };
+      }
+    }
+  }
+
+  // 2001:0000::/32 (Teredo 隧道) - 已废弃（RFC 4380），按前缀直接拒绝
+  // Teredo 内嵌 IPv4 在最后 32 位，但 URL 标准化会把点分 IPv4 转为 hex
+  // 并把 "2001:0000::" 压缩为 "2001::"，提取逻辑易出错；
+  // 且 Teredo 在生产环境不应使用，按前缀拒绝更安全。
+  // 注意：仅匹配 2001:0000::/32（Teredo），不影响 2001:db8::/32（文档）等
+  if (
+    ipv6Address.startsWith("2001::") ||
+    ipv6Address.startsWith("2001:0:0:") ||
+    ipv6Address.startsWith("2001:0000:")
+  ) {
+    return { valid: false, error: "Teredo tunnel address not allowed" };
+  }
+
+  // IPv4 映射地址 ::ffff:x.x.x.x 或 IPv4 兼容地址 ::x.x.x.x
+  // （normalizeIPv6Mapping 已处理部分格式，但这里再次检查所有变体）
+  const ipv4MappedMatch = ipv6Address.match(/(?:^|:)ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (ipv4MappedMatch) {
+    const embeddedIpv4 = ipv4MappedMatch[1];
+    const ipv4Result = validateIPv4Address(embeddedIpv4);
+    if (!ipv4Result.valid) {
+      return { valid: false, error: `IPv4-mapped IPv6 address embeds blocked IPv4: ${ipv4Result.error}` };
+    }
+  }
+
+  // ::x.x.x.x (IPv4 兼容地址，已废弃但仍有风险)
+  const ipv4CompatibleMatch = ipv6Address.match(/^::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (ipv4CompatibleMatch) {
+    const embeddedIpv4 = ipv4CompatibleMatch[1];
+    const ipv4Result = validateIPv4Address(embeddedIpv4);
+    if (!ipv4Result.valid) {
+      return { valid: false, error: `IPv4-compatible IPv6 address embeds blocked IPv4: ${ipv4Result.error}` };
+    }
+  }
+
   return { valid: true };
+}
+
+/**
+ * 从 6to4 隧道地址中提取内嵌的 IPv4 地址
+ * 6to4 格式: 2002:XXYY:ZZWW:: 表示内嵌 IPv4 为 XX.XX.YY.ZZ
+ * 其中 XXYY 是 IPv4 前 16 位的十六进制表示
+ *
+ * @param ipv6Address 6to4 IPv6 地址（小写）
+ * @returns 内嵌的 IPv4 地址（点分十进制），或 null（无法提取）
+ */
+function extractEmbeddedIPv4From6to4(ipv6Address: string): string | null {
+  // 2002:XXYY:ZZWW::... 或 2002:XXYY:ZZWW:...:...
+  const match = ipv6Address.match(/^2002:([0-9a-f]{1,4}):([0-9a-f]{1,4})/);
+  if (!match) return null;
+
+  const part1 = parseInt(match[1], 16);
+  const part2 = parseInt(match[2], 16);
+  const a = (part1 >> 8) & 0xff;
+  const b = part1 & 0xff;
+  const c = (part2 >> 8) & 0xff;
+  const d = part2 & 0xff;
+  return `${a}.${b}.${c}.${d}`;
+}
+
+/**
+ * 从 NAT64 地址中提取内嵌的 IPv4 地址
+ * NAT64 well-known prefix: 64:ff9b::/96
+ * IPv4 地址在最后 32 位
+ *
+ * @param ipv6Address NAT64 IPv6 地址（小写）
+ * @returns 内嵌的 IPv4 地址（点分十进制），或 null（无法提取）
+ */
+function extractEmbeddedIPv4FromNAT64(ipv6Address: string): string | null {
+  // 64:ff9b::xxxx:xxxx 或 64:ff9b:0:0:0:0:xxxx:xxxx
+  // 或 64:ff9b::a.b.c.d （某些表示法）
+  // 先尝试末尾 IPv4 点分格式
+  const dottedMatch = ipv6Address.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dottedMatch) {
+    return dottedMatch[1];
+  }
+
+  // 尝试从最后两个 16 位段提取
+  // 格式: 64:ff9b:0:0:0:0:XXXX:YYYY
+  const hexMatch = ipv6Address.match(/^64:ff9b:[0:]*([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hexMatch) {
+    const part1 = parseInt(hexMatch[1], 16);
+    const part2 = parseInt(hexMatch[2], 16);
+    const a = (part1 >> 8) & 0xff;
+    const b = part1 & 0xff;
+    const c = (part2 >> 8) & 0xff;
+    const d = part2 & 0xff;
+    return `${a}.${b}.${c}.${d}`;
+  }
+
+  return null;
 }
 
 /**
@@ -311,6 +431,21 @@ export function isValidPublicIp(ip: string): boolean {
     if (ipv6.startsWith('ff')) return false;
     // IPv4 映射地址 (已通过 normalizeIPv6Mapping 处理，但再次检查以防遗漏)
     if (ipv6.includes('::ffff:')) return false;
+    // 6to4 隧道：内嵌 IPv4 可能是私有地址（详见 validateIPv6Address）
+    if (ipv6.startsWith('2002:')) return false;
+    // NAT64：内嵌 IPv4 可能是私有地址
+    if (ipv6.startsWith('64:ff9b:')) return false;
+    // Teredo：内嵌 IPv4 可能是私有地址
+    // 与 validateIPv6Address 保持一致，覆盖三种压缩形式：
+    // - 2001::（最短压缩）
+    // - 2001:0:0:（部分压缩）
+    // - 2001:0000:（未压缩）
+    if (
+      ipv6.startsWith('2001::') ||
+      ipv6.startsWith('2001:0:0:') ||
+      ipv6.startsWith('2001:0000:') ||
+      ipv6.startsWith('2001:0:')
+    ) return false;
 
     return true;
   }
@@ -321,13 +456,16 @@ export function isValidPublicIp(ip: string): boolean {
 /**
  * DNS 解析结果缓存
  * 用于防止 DNS 重绑定攻击
+ *
+ * LRU 淘汰策略：与 AdvancedCache、ProxyAgent 池一致（规则8），
+ * 命中时移到末尾，热点域名优先保留。
  */
 const MAX_DNS_CACHE_SIZE = 500;
 const dnsCache = new Map<string, { ips: string[]; timestamp: number }>();
 const DNS_CACHE_TTL = 60 * 1000; // 60 秒缓存
 
 /**
- * 删除最旧缓存条目的辅助函数
+ * 删除最旧缓存条目的辅助函数（LRU 淘汰）
  */
 function evictOldestDnsCacheEntry(): void {
   const firstKey = dnsCache.keys().next().value;
@@ -345,6 +483,9 @@ export async function resolveDns(hostname: string): Promise<string[]> {
   // 检查缓存
   const cached = dnsCache.get(hostname);
   if (cached && Date.now() - cached.timestamp < DNS_CACHE_TTL) {
+    // LRU：命中时移到末尾（最近使用），与 AdvancedCache 一致
+    dnsCache.delete(hostname);
+    dnsCache.set(hostname, cached);
     return cached.ips;
   }
 
@@ -364,9 +505,21 @@ export async function resolveDns(hostname: string): Promise<string[]> {
     const dohUrl = (type: 'A' | 'AAAA') =>
       `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=${type}`;
 
+    // DoH 请求超时控制：5 秒内未完成则中止
+    // 防止 DoH 服务不可达时请求长时间挂起
+    const DOH_TIMEOUT_MS = 5000;
+    const fetchWithTimeout = (url: string): Promise<Response> => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), DOH_TIMEOUT_MS);
+      return fetch(url, {
+        headers: { Accept: 'application/dns-json' },
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeoutId));
+    };
+
     const [aResp, aaaaResp] = await Promise.allSettled([
-      fetch(dohUrl('A'), { headers: { Accept: 'application/dns-json' } }),
-      fetch(dohUrl('AAAA'), { headers: { Accept: 'application/dns-json' } }),
+      fetchWithTimeout(dohUrl('A')),
+      fetchWithTimeout(dohUrl('AAAA')),
     ]);
 
     const ips: string[] = [];
@@ -382,7 +535,28 @@ export async function resolveDns(hostname: string): Promise<string[]> {
     await extractAnswers(aaaaResp);
 
     // 去重
-    const uniqueIps = [...new Set(ips)];
+    let uniqueIps = [...new Set(ips)];
+
+    // 开发模式 fallback：DoH 不可达时回退到系统 DNS
+    // 生产环境保持 fail-closed（仅信任 DoH，防止 DNS 重绑定攻击）
+    if (uniqueIps.length === 0 && process.env.NODE_ENV !== 'production' && process.env.VERCEL !== '1') {
+      try {
+        const dnsPromises = await import('node:dns/promises');
+        const lookupResult = await dnsPromises.lookup(hostname, { all: true });
+        uniqueIps = lookupResult.map(r => r.address);
+        if (uniqueIps.length > 0) {
+          logger.warn(
+            `DoH 失败，开发模式回退到系统 DNS: ${hostname}`,
+            { module: 'Security', fallback: 'system-dns' },
+          );
+        }
+      } catch (fallbackError) {
+        logger.debug(
+          `系统 DNS 也失败: ${hostname}: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown error'}`,
+          { module: 'Security' },
+        );
+      }
+    }
 
     // 检查缓存大小限制，超过则删除最旧的条目
     if (dnsCache.size >= MAX_DNS_CACHE_SIZE) {
@@ -446,29 +620,35 @@ export function clearDnsCache(): void {
 
 /**
  * 验证代理端口是否有效
+ *
+ * 代理服务常运行在 80/443/3128/8080/8888 等端口，< 1024 的端口中
+ * 80 与 443 是常见的合法代理端口，不应被标记为可疑。
+ * 仅对非标准特权端口（如 1-79, 81-442, 444-1023）发出 warn。
+ *
  * @param port 端口号（字符串或数字）
  * @returns 验证结果
  */
 export function validateProxyPort(port: string | number): { valid: boolean; port?: number; error?: string } {
   const portNum = typeof port === 'string' ? parseInt(port, 10) : port;
-  
+
   if (isNaN(portNum)) {
     return { valid: false, error: 'Port is not a valid number' };
   }
-  
+
   if (!Number.isInteger(portNum)) {
     return { valid: false, error: 'Port must be an integer' };
   }
-  
+
   if (portNum < 1 || portNum > 65535) {
     return { valid: false, error: `Port ${portNum} is out of valid range (1-65535)` };
   }
-  
-  // 警告：特权端口通常不应作为代理端口
-  if (portNum < 1024) {
-    logger.warn(`端口号 ${portNum} 是特权端口，通常不应用作代理端口`, { module: 'Security' });
+
+  // 仅对非标准特权端口（1-79, 81-442, 444-1023）发出 warn
+  // 80 (HTTP) 和 443 (HTTPS) 是合法的代理端口，许多代理服务运行于此
+  if (portNum < 1024 && portNum !== 80 && portNum !== 443) {
+    logger.warn(`端口号 ${portNum} 是非常规特权端口，通常不应用作代理端口`, { module: 'Security' });
   }
-  
+
   return { valid: true, port: portNum };
 }
 

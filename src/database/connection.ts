@@ -355,19 +355,12 @@ async function autoRunMigration(): Promise<void> {
       return;
     }
 
-    // 执行迁移（使用内联 SQL）
+    // 执行迁移（一次性发送完整 SQL）
+    // 注意：不能用 split(";") 拆分，因为 PL/pgSQL 函数体（$$ ... $$ 块）内含分号，
+    // 拆分会破坏语法。pg 客户端支持多语句执行。
     logger.info("Running initial migration...", { module: 'Database' });
-    
-    const statements = SCHEMA_SQL
-      .split(";")
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
 
-    for (const statement of statements) {
-      if (statement.trim()) {
-        await query(statement);
-      }
-    }
+    await query(SCHEMA_SQL);
 
     // 记录迁移
     await query(

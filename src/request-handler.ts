@@ -25,12 +25,44 @@ import {
   DATABASE_CONFIG,
   SECURITY_CONFIG,
 } from "./config.js";
-import { request as undiciRequest, ProxyAgent } from "undici";
+import { request as undiciRequest, ProxyAgent, Agent } from "undici";
+import { isIP as netIsIP } from "node:net";
 import { getRandomUserAgent } from "./utils/user-agent.js";
+import { createPinnedAgent } from "./utils/pinned-agent.js";
+import {
+  readUndiciBodyWithLimit,
+  readWebBodyWithLimit,
+  type UndiciBodyLike,
+} from "./utils/body-reader.js";
 import { logger } from "./logger.js";
 
-// 响应体大小限制（使用配置值的 100 倍，因为响应体通常比请求体大）
-const MAX_RESPONSE_SIZE = SECURITY_CONFIG.maxRequestSize * 100;
+/**
+ * 检查字符串是否为有效的 IP 地址（IPv4 或 IPv6）
+ *
+ * 用于在 pinned DNS 路径前校验 resolvedIp，
+ * 防止无效值（如 undefined 字符串、域名等）传入自定义 lookup 导致连接失败。
+ *
+ * 优先使用 Node.js 内置 net.isIP 做严格格式校验（覆盖 IPv4-mapped IPv6 等所有合法形式）；
+ * Edge Runtime 下 node:net 不可用时，回退到纯 JS 正则校验，
+ * 避免静默 fail-open 导致 SSRF TOCTOU 防护失效（规则12：失败显性化）。
+ */
+// IPv4 点分十进制正则（保守，仅匹配 0-255 段）
+const IPV4_REGEX = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+// IPv6 简化正则：覆盖常见形式（含 ::、IPv4-mapped、点分末段）
+const IPV6_REGEX = /^(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}|:(?::[0-9a-fA-F]{1,4}){1,7}|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{0,4}|(?:[0-9a-fA-F]{1,4}:){1,5}:[0-9]{1,3}(?:\.[0-9]{1,3}){3}|(?:[0-9a-fA-F]{1,4}:){1,4}:[0-9]{1,3}(?:\.[0-9]{1,3}){3})$/;
+function isValidIpAddress(ip: string): boolean {
+  // 优先使用 node:net.isIP（更严格、覆盖更全）
+  if (typeof netIsIP === "function") {
+    return netIsIP(ip) !== 0;
+  }
+  // Edge Runtime fallback：纯 JS 正则校验，避免静默 fail-open
+  return IPV4_REGEX.test(ip) || IPV6_REGEX.test(ip);
+}
+
+// 响应体大小限制（统一从配置读取，与 webpage-capture 共享同一上限）
+// 向后兼容：若 SECURITY_CONFIG.maxResponseSize 未配置，回退到 maxRequestSize * 100
+const MAX_RESPONSE_SIZE =
+  SECURITY_CONFIG.maxResponseSize ?? SECURITY_CONFIG.maxRequestSize * 100;
 
 // HTTP 方法类型
 type HttpMethod =
@@ -49,8 +81,8 @@ type HttpMethod =
  * 复用 ProxyAgent 可避免每次请求都重新建立 TCP/TLS 连接，
  * 显著降低延迟与目标代理的连接开销。
  *
- * 容量限制：超过上限时淘汰最早加入的条目（FIFO），
- * 避免因代理池规模扩大而无限增长内存。
+ * 容量限制：LRU 淘汰（与 AdvancedCache 惯例一致，规则8），
+ * 超过上限时关闭并删除最近最少使用的条目，避免内存无限增长。
  */
 const proxyAgentPool = new Map<string, ProxyAgent>();
 const PROXY_AGENT_POOL_MAX_SIZE = 100;
@@ -63,22 +95,24 @@ const PROXY_AGENT_POOL_MAX_SIZE = 100;
 function getProxyAgent(proxyUrl: string): ProxyAgent {
   const existing = proxyAgentPool.get(proxyUrl);
   if (existing) {
+    // LRU：命中时移到末尾（最近使用），与 AdvancedCache 一致
+    proxyAgentPool.delete(proxyUrl);
+    proxyAgentPool.set(proxyUrl, existing);
     return existing;
   }
 
   const agent = new ProxyAgent(proxyUrl);
   proxyAgentPool.set(proxyUrl, agent);
 
-  // FIFO 淘汰：超过容量时关闭并删除最早加入的条目
+  // LRU 淘汰：超过容量时关闭并删除最早加入的条目（最近最少使用）
   if (proxyAgentPool.size > PROXY_AGENT_POOL_MAX_SIZE) {
     const oldestKey = proxyAgentPool.keys().next().value;
     if (oldestKey !== undefined) {
       const oldestAgent = proxyAgentPool.get(oldestKey);
-      try {
-        oldestAgent?.close();
-      } catch {
-        // 忽略关闭错误
-      }
+      // close() 返回 Promise，显式 catch 避免未处理 rejection（规则12：失败显性化）
+      oldestAgent?.close().catch((err: unknown) => {
+        logger.debug(`关闭 ProxyAgent 时出错: ${err instanceof Error ? err.message : String(err)}`, { module: "RequestHandler" });
+      });
       proxyAgentPool.delete(oldestKey);
     }
   }
@@ -88,16 +122,87 @@ function getProxyAgent(proxyUrl: string): ProxyAgent {
 
 /**
  * 关闭所有 ProxyAgent 并清空池（用于优雅关闭与测试）
+ *
+ * 返回 Promise 以便调用方 await 资源真正释放完成（避免 process.exit
+ * 提前中断事件循环，导致 TCP 连接被 RST 而非正常 FIN）。
  */
-export function closeAllProxyAgents(): void {
+export async function closeAllProxyAgents(): Promise<void> {
+  const closePromises: Promise<void>[] = [];
   for (const agent of proxyAgentPool.values()) {
-    try {
-      agent.close();
-    } catch {
-      // 忽略关闭错误
-    }
+    // close() 返回 Promise，统一收集后 await
+    closePromises.push(
+      agent.close().catch((err: unknown) => {
+        logger.debug(`关闭 ProxyAgent 时出错: ${err instanceof Error ? err.message : String(err)}`, { module: "RequestHandler" });
+      }),
+    );
   }
   proxyAgentPool.clear();
+  await Promise.all(closePromises);
+}
+
+/**
+ * pinned DNS Agent 池（按 resolvedIp 缓存）
+ *
+ * SSRF TOCTOU 防护：直连路径使用自定义 lookup 将域名固定到已验证的 IP，
+ * 防止第二次 DNS 解析返回内网地址（DNS 重绑定攻击）。
+ *
+ * 每个 resolvedIp 对应一个 Agent 实例（复用 TCP/TLS 连接），
+ * 超过容量时 LRU 淘汰（与 ProxyAgent 池、AdvancedCache 一致）。
+ */
+const pinnedAgentPool = new Map<string, Agent>();
+const PINNED_AGENT_POOL_MAX_SIZE = 50;
+
+/**
+ * 获取或创建 pin DNS 的 Agent
+ * @param resolvedIp 已验证的公网 IP
+ * @returns 复用的 Agent 实例（自定义 lookup 固定到 resolvedIp）
+ */
+function getPinnedAgent(resolvedIp: string): Agent {
+  const existing = pinnedAgentPool.get(resolvedIp);
+  if (existing) {
+    // LRU：命中时移到末尾（最近使用）
+    pinnedAgentPool.delete(resolvedIp);
+    pinnedAgentPool.set(resolvedIp, existing);
+    return existing;
+  }
+
+  // 使用统一的 pinned DNS Agent 工厂创建（SSRF TOCTOU 防护）
+  const agent = createPinnedAgent(resolvedIp);
+  pinnedAgentPool.set(resolvedIp, agent);
+
+  // LRU 淘汰：超过容量时关闭并删除最早加入的条目（最近最少使用）
+  if (pinnedAgentPool.size > PINNED_AGENT_POOL_MAX_SIZE) {
+    const oldestKey = pinnedAgentPool.keys().next().value;
+    if (oldestKey !== undefined) {
+      const oldestAgent = pinnedAgentPool.get(oldestKey);
+      // close() 返回 Promise，显式 catch 避免未处理 rejection
+      oldestAgent?.close().catch((err: unknown) => {
+        logger.debug(`关闭 pinned Agent 时出错: ${err instanceof Error ? err.message : String(err)}`, { module: "RequestHandler" });
+      });
+      pinnedAgentPool.delete(oldestKey);
+    }
+  }
+
+  return agent;
+}
+
+/**
+ * 关闭所有 pinned DNS Agent（用于优雅关闭与测试）
+ *
+ * 返回 Promise 以便调用方 await 资源真正释放完成（避免 process.exit
+ * 提前中断事件循环）。
+ */
+export async function closeAllPinnedAgents(): Promise<void> {
+  const closePromises: Promise<void>[] = [];
+  for (const agent of pinnedAgentPool.values()) {
+    closePromises.push(
+      agent.close().catch((err: unknown) => {
+        logger.debug(`关闭 pinned Agent 时出错: ${err instanceof Error ? err.message : String(err)}`, { module: "RequestHandler" });
+      }),
+    );
+  }
+  pinnedAgentPool.clear();
+  await Promise.all(closePromises);
 }
 
 // Undici 响应 headers 类型（来自 http.IncomingHttpHeaders）
@@ -105,19 +210,11 @@ interface UndiciHeaders extends Record<string, string | string[] | undefined> {
   [key: string]: string | string[] | undefined;
 }
 
-// Undici body 类型
-interface BodyReadable {
-  on(event: "data", listener: (chunk: Buffer) => void): this;
-  on(event: "end", listener: () => void): this;
-  on(event: "error", listener: (err: Error) => void): this;
-  destroy(): void;
-}
-
-// Undici 响应类型
+// Undici 响应类型（body 类型用统一的 UndiciBodyLike，避免重复定义）
 interface UndiciResponse {
   statusCode: number;
   headers: UndiciHeaders;
-  body: BodyReadable | null;
+  body: UndiciBodyLike | null;
   trailers: Record<string, string>;
 }
 
@@ -238,32 +335,6 @@ function ensureUserAgent(
 }
 
 /**
- * 读取响应体并限制大小（防止内存溢出）
- */
-async function readBodyWithLimit(
-  body: BodyReadable,
-  maxSize: number,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let totalSize = 0;
-
-    body.on("data", (chunk: Buffer) => {
-      totalSize += chunk.length;
-      if (totalSize > maxSize) {
-        body.destroy();
-        reject(new Error(`Response body exceeds ${maxSize} bytes`));
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    body.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    body.on("error", reject);
-  });
-}
-
-/**
  * 通过代理发送请求
  */
 async function sendRequestWithProxy(
@@ -334,7 +405,7 @@ async function sendRequestWithProxy(
     // 使用流式读取响应体，并限制大小
     let text = "";
     if (response.body) {
-      text = await readBodyWithLimit(response.body, MAX_RESPONSE_SIZE);
+      text = await readUndiciBodyWithLimit(response.body, MAX_RESPONSE_SIZE);
     }
 
     const headers: Record<string, string> = {};
@@ -381,12 +452,27 @@ async function sendRequestWithProxy(
 
 /**
  * 直接发送请求（不使用代理）
+ *
+ * SSRF TOCTOU 防护：当 request.resolvedIp 提供时，使用 pinned DNS Agent
+ * 将域名固定到已验证的 IP，防止第二次 DNS 解析返回内网地址。
  */
 async function sendRequestDirect(request: ProxyRequest): Promise<RequestResult> {
   logger.debug(`使用直连模式`, { module: "RequestHandler" });
   // ProxyRequest.method 可选：未指定时按 GET 处理
-  const method = request.method ?? "GET";
+  const method = (request.method ?? "GET").toUpperCase() as HttpMethod;
 
+  // SSRF TOCTOU 防护：有 resolvedIp 时走 pinned DNS 路径
+  // 仅当 resolvedIp 是有效 IP 地址时才使用 pinned DNS，避免无效值导致连接失败
+  if (request.resolvedIp && isValidIpAddress(request.resolvedIp)) {
+    return sendRequestDirectPinned(request, method);
+  }
+
+  // resolvedIp 无效或未提供时，走标准 fetch 路径（向后兼容）
+  if (request.resolvedIp && !isValidIpAddress(request.resolvedIp)) {
+    logger.warn(`resolvedIp 值无效（${request.resolvedIp}），回退到标准 fetch 路径`, { module: "RequestHandler" });
+  }
+
+  // 无 resolvedIp 时保持原有 fetch 路径（向后兼容）
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(
@@ -429,62 +515,17 @@ async function sendRequestDirect(request: ProxyRequest): Promise<RequestResult> 
       };
     }
 
-    // 使用流式读取响应体，并限制大小
-    const reader = response.body?.getReader();
+    // 使用统一的流式读取工具，限制响应体大小防止 OOM
     let text = "";
-
-    if (reader) {
-      const chunks: Uint8Array[] = [];
-      let totalSize = 0;
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-
-          if (done) break;
-
-          totalSize += value.length;
-          if (totalSize > MAX_RESPONSE_SIZE) {
-            reader.cancel();
-            return {
-              success: false,
-              error: `Response body exceeds ${MAX_RESPONSE_SIZE} bytes`,
-            };
-          }
-
-          chunks.push(value);
-        }
-
-        // 合并所有 chunks 并转换为字符串
-        const totalLength = chunks.reduce(
-          (sum, chunk) => sum + chunk.length,
-          0,
-        );
-        const combinedArray = new Uint8Array(totalLength);
-        let offset = 0;
-        for (const chunk of chunks) {
-          combinedArray.set(chunk, offset);
-          offset += chunk.length;
-        }
-
-        text = new TextDecoder("utf-8").decode(combinedArray);
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown error";
-        return {
-          success: false,
-          error: errorMessage,
-        };
-      }
-    } else {
-      // 如果没有流式 body，使用 text() 方法并检查大小
-      text = await response.text();
-      if (text.length > MAX_RESPONSE_SIZE) {
-        return {
-          success: false,
-          error: `Response body exceeds ${MAX_RESPONSE_SIZE} bytes`,
-        };
-      }
+    try {
+      text = await readWebBodyWithLimit(response.body, MAX_RESPONSE_SIZE);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      return {
+        success: false,
+        error: errorMessage,
+      };
     }
 
     return {
@@ -498,6 +539,94 @@ async function sendRequestDirect(request: ProxyRequest): Promise<RequestResult> 
       error instanceof Error ? error.message : "Unknown error";
     logger.error(
       `直连请求失败: ${errorMessage}`,
+      error instanceof Error ? error : undefined,
+      { module: "RequestHandler" },
+    );
+    return {
+      success: false,
+      error: errorMessage,
+    };
+  }
+}
+
+/**
+ * 使用 pinned DNS 发送直连请求（SSRF TOCTOU 防护）
+ *
+ * 当上层已通过 validateDnsResolution 验证 IP 为公网地址时，
+ * 使用此路径将 DNS 固定到已验证的 IP，防止 DNS 重绑定攻击。
+ */
+async function sendRequestDirectPinned(
+  request: ProxyRequest,
+  method: HttpMethod,
+): Promise<RequestResult> {
+  logger.debug(`使用 pinned DNS 直连模式: ${request.resolvedIp}`, {
+    module: "RequestHandler",
+  });
+
+  try {
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(
+      () => timeoutController.abort(),
+      REQUEST_TIMEOUT_CONFIG.direct,
+    );
+
+    // 过滤危险 headers
+    const filteredHeaders = request.headers
+      ? filterDangerousHeaders(request.headers)
+      : {};
+
+    ensureUserAgent(filteredHeaders);
+
+    const dispatcher = getPinnedAgent(request.resolvedIp!);
+
+    const undiciOptions = {
+      method,
+      headers: filteredHeaders as Record<string, string>,
+      dispatcher,
+      signal: timeoutController.signal,
+      body: request.body,
+    };
+
+    const response = (await undiciRequest(
+      request.url,
+      undiciOptions,
+    )) as unknown as UndiciResponse;
+    clearTimeout(timeoutId);
+
+    // 使用流式读取响应体，并限制大小
+    let text = "";
+    if (response.body) {
+      text = await readUndiciBodyWithLimit(response.body, MAX_RESPONSE_SIZE);
+    }
+
+    const headers: Record<string, string> = {};
+    if (response.headers) {
+      for (const [key, value] of Object.entries(response.headers)) {
+        if (value !== undefined) {
+          headers[key] = Array.isArray(value) ? value.join(", ") : value;
+        }
+      }
+    }
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return {
+        success: true,
+        data: text,
+        status: response.statusCode,
+        headers,
+      };
+    }
+
+    return {
+      success: false,
+      error: `HTTP ${response.statusCode}`,
+      data: text,
+    };
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+    logger.error(
+      `pinned DNS 直连请求失败: ${errorMessage}`,
       error instanceof Error ? error : undefined,
       { module: "RequestHandler" },
     );
@@ -589,7 +718,11 @@ export async function sendProxyRequest(
 
       return {
         success: false,
-        error: `代理失败，直连也失败`,
+        // 保留原始错误信息（如 OOM/超时/HTTP 状态等）便于诊断，
+        // 同时附加上下文标识走过了 fallback 路径
+        error: result.error
+          ? `代理失败，直连也失败: ${result.error}`
+          : `代理失败，直连也失败`,
         proxyUsed: false,
         proxyIp: null,
         proxySuccess: false,

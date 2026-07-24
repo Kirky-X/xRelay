@@ -11,7 +11,7 @@ export function createMockFetch() {
   });
 }
 
-export function createMockResponse(data: any, status = 200) {
+export function createMockResponse(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json" },

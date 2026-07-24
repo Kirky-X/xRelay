@@ -118,6 +118,10 @@ export const SECURITY_CONFIG = {
   ],
   // 请求大小限制（字节）
   maxRequestSize: 100 * 1024, // 100KB (was 10MB)
+  // 响应体大小限制（字节）
+  // 用于限制代理/直连/降级路径的响应体读取，防止 OOM
+  // 与 request-handler.ts 和 webpage-capture/* 共享使用
+  maxResponseSize: 10 * 1024 * 1024, // 10MB
   // 是否启用详细日志（生产环境应设为 false）
   enableVerboseLogging: process.env.NODE_ENV !== "production",
 };
@@ -130,15 +134,20 @@ export function isProduction(): boolean {
 }
 
 // CORS 配置
+// 优先从 CORS_ORIGINS 环境变量读取（逗号分隔），未配置时回退到默认白名单
+// 生产环境务必显式配置 CORS_ORIGINS，避免依赖硬编码默认值
 export const CORS_CONFIG = {
-  // 生产环境不应包含 localhost
-  allowedOrigins: isProduction()
-    ? ["https://vercel-proxy-shield.vercel.app"]
-    : [
-        "https://vercel-proxy-shield.vercel.app",
-        "http://localhost:3000",
-        "http://localhost:5173",
-      ],
+  allowedOrigins: process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : isProduction()
+      ? ["https://vercel-proxy-shield.vercel.app"]
+      : [
+          "https://vercel-proxy-shield.vercel.app",
+          "http://localhost:3000",
+          "http://localhost:5173",
+        ],
   allowedMethods: ["POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "x-api-key"],
   maxAge: 86400, // 24小时
@@ -147,6 +156,10 @@ export const CORS_CONFIG = {
 /**
  * 验证生产环境配置
  * @returns 验证结果，包含是否有效和错误列表
+ *
+ * 注意：本函数仅返回验证结果，是否阻止启动由调用方决定。
+ * - standalone.ts（独立部署）：验证失败时记录错误并 exit(1)
+ * - Vercel Edge：函数即起即停，不阻止启动但记录错误日志
  */
 export function validateProductionConfig(): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
@@ -167,6 +180,11 @@ export function validateProductionConfig(): { valid: boolean; errors: string[] }
       errors.push("CRON_SECRET environment variable must be set in production to protect cron endpoints");
     }
 
+    // 生产环境建议显式配置 CORS_ORIGINS（不依赖硬编码默认值）
+    if (!process.env.CORS_ORIGINS || process.env.CORS_ORIGINS.trim() === "") {
+      errors.push("CORS_ORIGINS environment variable must be set in production to lock down allowed origins");
+    }
+
     // 生产环境应关闭详细日志
     if (process.env.ENABLE_VERBOSE_LOGGING === "true") {
       console.warn("[Config] WARNING: Verbose logging is enabled in production");
@@ -177,4 +195,21 @@ export function validateProductionConfig(): { valid: boolean; errors: string[] }
     valid: errors.length === 0,
     errors,
   };
+}
+
+/**
+ * 验证生产环境配置，失败时记录错误并退出进程（仅独立部署使用）
+ *
+ * 用于 standalone.ts 等长生命周期进程：配置错误会导致服务以不安全状态运行，
+ * 因此必须 fail-closed。Vercel Edge 函数不调用此函数（短生命周期，无法 exit）。
+ */
+export function enforceProductionConfigOrExit(): void {
+  const result = validateProductionConfig();
+  if (!result.valid) {
+    for (const err of result.errors) {
+      console.error(`[Config] CRITICAL: ${err}`);
+    }
+    console.error("[Config] Production config validation failed. Exiting.");
+    process.exit(1);
+  }
 }

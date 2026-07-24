@@ -20,6 +20,24 @@ import { BrowserPool, getBrowserPool } from './browser-pool.js';
 import { createResourceProcessor } from './resource-processor.js';
 import { extractArticle } from './article-extractor.js';
 import { logger } from '../logger.js';
+import { request as undiciRequest } from 'undici';
+import { createPinnedAgent } from '../utils/pinned-agent.js';
+import {
+  readUndiciBodyWithLimit,
+  readWebBodyWithLimit,
+  type UndiciBodyLike,
+} from '../utils/body-reader.js';
+import { SECURITY_CONFIG } from '../config.js';
+
+/**
+ * 降级 fetch 响应体最大字节数
+ *
+ * 保护降级路径不被恶意/异常目标网站的大响应体触发 OOM。
+ * 与 request-handler.ts 共享 SECURITY_CONFIG.maxResponseSize，保持一致。
+ * 向后兼容：未配置时回退到 10 * 1024 * 1024 (10MB)。
+ */
+const MAX_FETCH_RESPONSE_SIZE =
+  SECURITY_CONFIG.maxResponseSize ?? 10 * 1024 * 1024;
 
 /**
  * 捕获服务类
@@ -146,6 +164,9 @@ export class CaptureService {
    * Fetch 降级捕获 - 无浏览器时直接 fetch HTML
    * 仅返回静态 HTML，不渲染 JS、不处理动态内容
    *
+   * SSRF TOCTOU 防护：当 options.resolvedIp 提供时，使用 pinned DNS
+   * 将域名固定到已验证的 IP，防止第二次 DNS 解析返回内网地址。
+   *
    * 错误处理策略：浏览器失败 + fetch 失败 → 合并错误信息，便于排查
    *
    * @param browserError 原始浏览器错误（用于合并错误信息）
@@ -158,6 +179,11 @@ export class CaptureService {
     startTime: number,
   ): Promise<CaptureResult> {
     try {
+      // SSRF TOCTOU 防护：有 resolvedIp 时使用 pinned DNS Agent
+      if (options.resolvedIp) {
+        return await this.captureWithFetchPinned(url, options, browserError, startTime);
+      }
+
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -181,7 +207,7 @@ export class CaptureService {
         };
       }
 
-      const html = await response.text();
+      const html = await readWebBodyWithLimit(response.body, MAX_FETCH_RESPONSE_SIZE);
       const title = this.extractTitleFromHtml(html);
       const finalUrl = response.url || url;
       const duration = Date.now() - startTime;
@@ -217,6 +243,104 @@ export class CaptureService {
         mode: 'html',
         duration,
       };
+    }
+  }
+
+  /**
+   * 使用 pinned DNS 的 fetch 降级捕获（SSRF TOCTOU 防护）
+   *
+   * 当上层已通过 validateDnsResolution 验证 IP 为公网地址时，
+   * 使用此路径将 DNS 固定到已验证的 IP，防止 DNS 重绑定攻击。
+   */
+  private async captureWithFetchPinned(
+    url: string,
+    options: Required<CaptureOptions>,
+    browserError: string,
+    startTime: number,
+  ): Promise<CaptureResult> {
+    logger.debug(`使用 pinned DNS fetch 降级: ${options.resolvedIp}`, {
+      module: 'CaptureService',
+      url,
+    });
+
+    // 创建一次性 pinned Agent（降级路径，不池化）
+    // 使用统一的 pinned DNS Agent 工厂创建（SSRF TOCTOU 防护）
+    const agent = createPinnedAgent(options.resolvedIp);
+
+    try {
+      const response = await undiciRequest(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': options.userAgent,
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        dispatcher: agent,
+        maxRedirections: 5,
+      });
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        const duration = Date.now() - startTime;
+        const fetchError = `Fetch fallback failed: HTTP ${response.statusCode}`;
+        logger.warn(fetchError, { module: 'CaptureService', url });
+
+        return {
+          success: false,
+          error: `Browser: ${browserError}; Fetch: HTTP ${response.statusCode}`,
+          url,
+          mode: 'html',
+          duration,
+        };
+      }
+
+      const html = await readUndiciBodyWithLimit(
+        response.body as unknown as UndiciBodyLike | null,
+        MAX_FETCH_RESPONSE_SIZE,
+      );
+      const title = this.extractTitleFromHtml(html);
+      const duration = Date.now() - startTime;
+
+      logger.info(`Pinned fetch fallback completed: ${url}`, {
+        module: 'CaptureService',
+        duration,
+        htmlLength: html.length,
+      });
+
+      return {
+        success: true,
+        html,
+        title,
+        url,
+        mode: 'html',
+        degraded: true,
+        capturedAt: new Date().toISOString(),
+        duration,
+      };
+    } catch (fetchError) {
+      const duration = Date.now() - startTime;
+      const fetchErrorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
+
+      logger.error(`Pinned fetch fallback failed: ${url}`, fetchError instanceof Error ? fetchError : undefined, {
+        module: 'CaptureService',
+      });
+
+      return {
+        success: false,
+        error: `Browser: ${browserError}; Fetch: ${fetchErrorMessage}`,
+        url,
+        mode: 'html',
+        duration,
+      };
+    } finally {
+      try {
+        // Agent.close() 返回 Promise，必须 await 避免未处理 rejection
+        // （规则12：失败显性化）
+        await agent.close();
+      } catch (err) {
+        logger.debug(
+          `关闭 pinned Agent 时出错: ${err instanceof Error ? err.message : String(err)}`,
+          { module: 'CaptureService' },
+        );
+      }
     }
   }
 

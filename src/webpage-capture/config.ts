@@ -132,6 +132,8 @@ export const DEFAULT_CAPTURE_OPTIONS: Omit<Required<CaptureOptions>, 'maxImageSi
   viewport: PAGE_CONFIG.defaultViewport,
   preserveLinks: false,
   processIframes: false,
+  // SSRF TOCTOU 防护：默认不 pin DNS（空字符串走常规 fetch 路径）
+  resolvedIp: '',
 };
 
 /**

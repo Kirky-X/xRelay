@@ -28,7 +28,7 @@ vi.mock("../../src/proxy-fetcher.js", () => ({
 }));
 
 vi.mock("../../src/proxy-tester.js", () => ({
-  quickTestProxies: vi.fn((proxies: any[]) => Promise.resolve(proxies)),
+  quickTestProxies: vi.fn((proxies: Array<{ ip: string; port: string | number; source?: string }>) => Promise.resolve(proxies)),
   cleanupBlacklist: vi.fn(),
   getBlacklistStatus: vi.fn(() => ({ size: 0, samples: [] })),
 }));

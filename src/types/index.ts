@@ -28,6 +28,15 @@ export interface ProxyRequest {
   headers?: Record<string, string>;
   body?: string;
   timeout?: number;
+  /**
+   * 已验证的解析 IP（用于防止 DNS 重绑定 / SSRF TOCTOU）
+   *
+   * 由上层 validateDnsResolution 解析并验证为公网地址后传入。
+   * 直连路径会通过自定义 DNS lookup 将请求固定到该 IP，
+   * 避免第二次 DNS 解析返回内网地址。
+   * 代理路径不使用此字段（代理服务器自行解析目标域名）。
+   */
+  resolvedIp?: string;
 }
 
 /**
@@ -54,16 +63,12 @@ export interface ProxyResponse {
   cached?: boolean;
 }
 
-export interface RequestContext {
-  requestId: string;
-  clientIp: string;
-  startTime: number;
-  apiKey?: string;
-}
-
 /**
  * 请求结果类型（内部使用）
  * 用于 request-handler 内部的请求结果
+ *
+ * 注：运行时中立的 RequestContext 定义在 src/server/handlers.ts，
+ *     请勿在此重复定义同名接口造成歧义。
  */
 export interface RequestResult {
   success: boolean;

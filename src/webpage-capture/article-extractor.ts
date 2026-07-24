@@ -101,11 +101,9 @@ export async function extractArticle(
     }
 
     const rawContent = result.content || '';
-    const rawTextContent = (result as any).textContent || '';
 
-    const cleanTextContent = rawTextContent
-      ? stripHtmlTags(rawTextContent)
-      : stripHtmlTags(rawContent);
+    // ArticleData 类型仅暴露 content（HTML），通过 stripHtmlTags 转换为纯文本
+    const cleanTextContent = stripHtmlTags(rawContent);
 
     const duration = Date.now() - startTime;
     logger.info(`Article extracted successfully`, {
@@ -170,11 +168,9 @@ export async function extractArticleFromUrl(url: string): Promise<ArticleResult>
     }
 
     const rawContent = result.content || '';
-    const rawTextContent = (result as any).textContent || '';
 
-    const cleanTextContent = rawTextContent
-      ? stripHtmlTags(rawTextContent)
-      : stripHtmlTags(rawContent);
+    // ArticleData 类型仅暴露 content（HTML），通过 stripHtmlTags 转换为纯文本
+    const cleanTextContent = stripHtmlTags(rawContent);
 
     const duration = Date.now() - startTime;
     logger.info(`Article extracted from URL successfully`, {

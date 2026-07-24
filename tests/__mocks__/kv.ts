@@ -1,11 +1,15 @@
 import { vi } from "vitest";
 
+/**
+ * Mock Vercel KV / Upstash Redis 客户端
+ * 使用内存 Map 存储，模拟异步行为
+ */
 export function createMockKV() {
-  const store = new Map<string, any>();
+  const store = new Map<string, unknown>();
 
   return {
     get: vi.fn((key: string) => Promise.resolve(store.get(key))),
-    set: vi.fn((key: string, value: any, _options?: { px?: number }) => {
+    set: vi.fn((key: string, value: unknown, _options?: { px?: number }) => {
       store.set(key, value);
       return Promise.resolve("OK");
     }),
@@ -15,7 +19,7 @@ export function createMockKV() {
       return Promise.resolve(existed ? 1 : 0);
     }),
     incr: vi.fn((key: string) => {
-      const current = (store.get(key) || 0) + 1;
+      const current = ((store.get(key) as number) || 0) + 1;
       store.set(key, current);
       return Promise.resolve(current);
     }),

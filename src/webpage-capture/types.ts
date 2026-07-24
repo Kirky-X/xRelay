@@ -97,6 +97,19 @@ export interface CaptureOptions {
 
   /** 是否处理 iframe 内容（仅 full 模式有效） */
   processIframes?: boolean;
+
+  /**
+   * 已验证的解析 IP（SSRF TOCTOU 防护）
+   *
+   * 由上层 validateDnsResolution 解析并验证为公网地址后传入。
+   * 当前实现：
+   * - fetch 降级路径（captureWithFetchPinned）：使用 undici Agent + 自定义 lookup 固定 IP
+   * - 浏览器渲染路径（puppeteer）：暂未实现 DNS pin，依赖 puppeteer 自行解析
+   *   （浏览器渲染路径的 SSRF 防护通过 URL 白名单 + 私有 IP 拒绝实现，但存在 TOCTOU 窗口）
+   *
+   * TODO: 浏览器渲染路径需通过 --host-resolver-rules 或 page.setRequestInterception 实现 DNS pin
+   */
+  resolvedIp?: string;
 }
 
 /**

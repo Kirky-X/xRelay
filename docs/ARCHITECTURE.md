@@ -4,7 +4,7 @@
 
 ### Technical Architecture & Design Decisions
 
-[🏠 Home](./README.md) • [🔧 API Docs](./README.md#api-文档)
+[🏠 Home](../README.md) • [🔧 API Docs](../README.md#api-文档)
 
 ---
 
@@ -89,7 +89,7 @@ graph TB
 
     subgraph "Data Layer"
         G[PostgreSQL Database]
-        H[Redis / Vercel KV]
+        H[Redis / Vercel KV<br/>可选：跨实例缓存]
     end
 
     subgraph "External Resources"
@@ -107,8 +107,7 @@ graph TB
     F -- Cache Miss --> E
 
     E -- Proxy Stats --> G
-    E -- Rate Limit Data --> H
-    F -- Cache Storage --> H
+    F -- Cache Storage (可选跨实例) --> H
 
     E -- 1. Try Proxy --> I
     I -- Forward --> J
@@ -144,6 +143,17 @@ Vercel IO 适配层，将 `VercelRequest/VercelResponse` 适配到共享核心�
   - 调用 `dispatchRequest` 处理业务
   - 将 `ResponseSpec` 应用到 `VercelResponse`
 
+**端点路由**（`dispatchRequest`）:
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| OPTIONS | * | 204 No Content（CORS 预检） |
+| GET | `/api`, `/api/health`, `/api/ready` | 200 健康检查（返回版本/uptime） |
+| POST | `/api/capture` | 网页捕获（限流 30/分，需 `CHROME_PATH`） |
+| POST | `/api` | 代理请求（限流 100/分） |
+| POST/GET | `/api/cron/cleanup` | Vercel Cron 清理端点（独立文件 `api/cron/cleanup.ts`，需 `CRON_SECRET`） |
+| 其他 | * | 405 Method Not Allowed |
+
 ### 2️⃣ Database Layer (`src/database/`)
 
 Manages proxy data persistence and state across multiple deployment instances.
@@ -154,11 +164,11 @@ Manages proxy data persistence and state across multiple deployment instances.
   - `deprecated-proxies-dao.ts`: Failed proxy tracking
   - `cleanup.ts`: Automated maintenance tasks
 
-### 3️⃣ Cache Layer (`src/cache/`)
+### 3️⃣ Cache Layer
 
 Provides response caching to reduce redundant requests and improve performance.
 
-- **Storage**: In-memory LRU cache (`advanced-cache.ts`)
+- **Storage**: In-memory LRU cache (`src/cache/advanced-cache.ts`，被 `ProxyService` 引用)
 - **TTL**: 5 minutes (configurable via `CACHE_CONFIG.ttl`)
 - **Max Size**: 100 entries (configurable via `CACHE_CONFIG.maxSize`)
 - **Strategy**: Cache-aside pattern (仅缓存 GET 请求)
@@ -202,11 +212,12 @@ Provides request processing pipeline.实际的路由分发、CORS、认证在 `s
 
 Provides webpage capture capabilities.
 
-- **Modes**: HTML, Screenshot, Article extraction
+- **Modes**: `html`（仅渲染后 HTML，快速）/ `full`（完整网页，资源内联为 Data URI）
+- **Article Extraction**: 独立选项 `extractArticle`，使用 `@extractus/article-extractor` 解析正文
 - **Browser Pool**: Manages browser instances for rendering
-- **Article Extractor**: Extracts clean article content from webpages
 - **Resource Processor**: Processes and inlines resources (CSS, images)
 - **Stealth Scripts**: Anti-detection scripts for headless browser
+- **Browser Path**: 由 `CHROME_PATH` 环境变量指定可执行文件路径（Vercel 环境使用 `@sparticuz/chromium`）
 
 ---
 
@@ -214,7 +225,7 @@ Provides webpage capture capabilities.
 
 1.  **Incoming Request**: Client sends a POST request with `url`, `method`, and `headers`.
 2.  **Validation**: System checks for required fields and validates headers.
-3.  **Rate Limit Check**: Checks if the IP or global rate limit has been exceeded.
+3.  **Rate Limit Check**: 按端点 + 客户端 IP 隔离检查（代理端点 100/分，捕获端点 30/分；未知/无效 IP 降至 1/10）。内存滑动窗口实现，不依赖 Redis。
 4.  **Proxy Attempt**:
     - Select a proxy from the pool.
     - Forward request via proxy.
@@ -249,7 +260,7 @@ Provides webpage capture capabilities.
 - **Frontend Framework**: Vue.js 3
 - **Build Tool**: Vite
 - **Database**: PostgreSQL (with @vercel/postgres)
-- **Cache**: Redis / Vercel KV
+- **Cache**: In-memory LRU（默认，5 分钟 TTL / 100 条），可选 Redis / Vercel KV 跨实例
 - **HTTP Client**: Undici
 - **Testing**: Vitest
 - **Deployment**: Vercel / Docker
@@ -260,6 +271,7 @@ Provides webpage capture capabilities.
 
 - **IP Hiding**: The target server sees the Proxy IP or Vercel's IP, never the User's IP.
 - **Rate Limiting**:
-  - **Global**: Protects against system-wide abuse.
-  - **Per IP**: Prevents individual users from hogging resources.
+  - **按端点隔离**: 代理端点 100/分，捕获端点 30/分
+  - **按 IP 隔离**: 每个 IP 独立计数；未知/无效 IP 降至 1/10 防止伪造头
+  - **实现**: 内存滑动窗口（单实例），不依赖 Redis
 - **Header Sanitization**: Removes sensitive headers before forwarding.

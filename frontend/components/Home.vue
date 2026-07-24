@@ -21,7 +21,7 @@
       <div class="container">
         <!-- Logo -->
         <div class="logo-container">
-          <img src="/docs/asset/xRelay.png" alt="xRelay Logo" />
+          <img :src="logoUrl" alt="xRelay Logo" />
           <div class="logo-text">xRelay</div>
         </div>
 
@@ -80,6 +80,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+// Logo 资源：通过 Vite ?url 导入，构建时被打包到 dist/assets/，运行时路径自动正确
+import logoUrl from '../../docs/assets/xRelay.png?url';
 
 const typingText = ref('');
 const fullText = '安全、快速、免费的代理转发服务';

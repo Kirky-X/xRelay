@@ -301,6 +301,20 @@ describe("dispatchRequest - 路由分发", () => {
       expect(spec.headers["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
       expect(spec.headers["Permissions-Policy"]).toContain("geolocation=()");
     });
+
+    it("应包含严格的 CSP 头（default-src none）", async () => {
+      const spec = await dispatchRequest(makeCtx({ method: "GET", path: "/api" }));
+      expect(spec.headers["Content-Security-Policy"]).toContain("default-src 'none'");
+      expect(spec.headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
+      expect(spec.headers["Content-Security-Policy"]).toContain("base-uri 'none'");
+    });
+
+    it("应包含 no-store Cache-Control 防止敏感响应被缓存", async () => {
+      const spec = await dispatchRequest(makeCtx({ method: "GET", path: "/api" }));
+      expect(spec.headers["Cache-Control"]).toBe("no-store, no-cache, must-revalidate");
+      expect(spec.headers["Pragma"]).toBe("no-cache");
+      expect(spec.headers["Expires"]).toBe("0");
+    });
   });
 
   describe("限流触发", () => {

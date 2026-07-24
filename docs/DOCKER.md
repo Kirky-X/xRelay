@@ -11,18 +11,30 @@
 
 ## 📝 环境变量准备
 
-Docker Compose 使用 `.env` 文件中的以下必需变量：
+Docker Compose 使用 `.env` 文件中的以下必需变量（`docker-compose.yml` 通过 `${VAR:?...}` 强制校验）：
 
 ```bash
-# 生产环境务必使用强密码（>= 32 字符随机串）
+# PostgreSQL（生产环境务必使用强密码 >= 32 字符随机串）
 POSTGRES_USER=xrelay
 POSTGRES_PASSWORD=CHANGE_ME_REQUIRED_strong_random_secret_min_32_chars
 POSTGRES_DB=xrelay
+
+# Redis（生产环境务必使用强密码 >= 32 字符随机串）
 REDIS_PASSWORD=CHANGE_ME_REQUIRED_another_strong_random_secret_min_32_chars
 
 # API Key（生产环境必需）
-ENABLE_API_KEY=true
+ENABLE_API_KEY=true   # docker-compose.yml 默认即为 true
 API_KEYS=your-secret-api-key-here
+
+# Cron 端点保护（生产环境必需，保护 /api/cron/cleanup）
+CRON_SECRET=your-cron-secret-min-32-chars-random
+
+# CORS 来源锁死（生产环境必需，逗号分隔）
+CORS_ORIGINS=https://your-frontend.vercel.app
+
+# Vercel KV / Redis（可选，未配置时缓存走内存降级）
+KV_REST_API_URL=
+KV_REST_API_TOKEN=
 ```
 
 创建 `.env` 文件：
@@ -89,46 +101,48 @@ docker compose -f docker/docker-compose.dev.yml down
 
 ### PostgreSQL
 
-- **端口**: 5432
-- **用户**: xrelay
-- **密码**: xrelay_password
-- **数据库**: xrelay
-- **连接字符串**: `postgresql://xrelay:xrelay_password@localhost:5432/xrelay`
+- **端口**: `127.0.0.1:15432`（仅本机访问，映射到容器内 5432）
+- **用户**: 由 `POSTGRES_USER` 提供（默认 `xrelay`）
+- **密码**: 由 `POSTGRES_PASSWORD` 提供（生产必须强随机串 >= 32 字符）
+- **数据库**: 由 `POSTGRES_DB` 提供（默认 `xrelay`）
+- **连接字符串**: `postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}`
 
 ### Redis
 
-- **端口**: 6379
-- **用途**: KV 存储（缓存、限流）
+- **端口**: `127.0.0.1:16379`（仅本机访问，映射到容器内 6379）
+- **密码**: 由 `REDIS_PASSWORD` 提供
+- **用途**: KV 存储（可选跨实例缓存；限流为内存实现，不依赖 Redis）
 
 ### 应用
 
-- **端口**: 3000
-- **环境变量**:
+- **端口**: `127.0.0.1:13000`（仅本机访问，映射到容器内 3000，对外应通过反向代理）
+- **容器内监听**: `HOST=0.0.0.0`（compose 显式设置以接收映射流量）
+- **环境变量**（由 `docker-compose.yml` 从 `.env` 注入）:
+  - `NODE_ENV=production`
+  - `HOST=0.0.0.0` / `PORT=3000`
   - `DATABASE_URL`: PostgreSQL 连接字符串
-  - `ENABLE_API_KEY`: 是否启用 API Key 验证
-  - `KV_REST_API_URL`: Redis 连接 URL
-  - `KV_REST_API_TOKEN`: Redis 密码
+  - `ENABLE_API_KEY` / `API_KEYS`: API Key 验证（生产默认启用）
+  - `CRON_SECRET`: 保护 `/api/cron/cleanup` 端点
+  - `CORS_ORIGINS`: 锁死允许的前端来源
+  - `KV_REST_API_URL` / `KV_REST_API_TOKEN`: 可选 KV 配置
 
 ## 🔧 配置
 
 ### 修改数据库密码
 
-编辑 `docker/docker-compose.yml` 或 `docker/docker-compose.dev.yml`：
+`docker-compose.yml` 通过 `${POSTGRES_PASSWORD:?...}` 从 `.env` 读取密码，因此直接编辑项目根目录的 `.env` 文件：
 
-```yaml
-postgres:
-  environment:
-    POSTGRES_USER: xrelay
-    POSTGRES_PASSWORD: your_password  # 修改这里
-    POSTGRES_DB: xrelay
+```bash
+# 编辑 .env
+POSTGRES_PASSWORD=your_new_strong_password_min_32_chars
 ```
 
-同时更新应用的环境变量：
+应用容器的 `DATABASE_URL` 由 compose 自动拼接 `${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}`，无需单独维护。
 
-```yaml
-app:
-  environment:
-    DATABASE_URL: postgresql://xrelay:your_password@postgres:5432/xrelay  # 修改这里
+修改后重启服务生效：
+```bash
+docker compose -f docker/docker-compose.yml --env-file .env down
+docker compose -f docker/docker-compose.yml --env-file .env up -d
 ```
 
 ### 修改端口
@@ -139,15 +153,15 @@ app:
 services:
   app:
     ports:
-      - "8080:3000"  # 将应用端口改为 8080
+      - "127.0.0.1:8080:3000"  # 将应用主机端口改为 8080（保持仅本机访问）
 
   postgres:
     ports:
-      - "5433:5432"  # 将 PostgreSQL 端口改为 5433
+      - "127.0.0.1:5433:5432"  # 将 PostgreSQL 主机端口改为 5433
 
   redis:
     ports:
-      - "6380:6379"  # 将 Redis 端口改为 6380
+      - "127.0.0.1:6380:6379"  # 将 Redis 主机端口改为 6380
 ```
 
 ## 🧪 测试
@@ -159,9 +173,11 @@ services:
 ./docker/docker-test.sh
 # 选择 "8) 测试 API"
 
-# 或手动测试（确保 Docker 已映射端口）
-curl -X POST http://localhost:3000/api \
+# 或手动测试（确保 Docker 已映射端口，生产环境需提供 x-api-key）
+# 主机端口 13000 映射到容器内 3000
+curl -X POST http://localhost:13000/api \
   -H "Content-Type: application/json" \
+  -H "x-api-key: ${API_KEYS}" \
   -d '{
     "url": "https://httpbin.org/ip",
     "method": "GET"
@@ -274,30 +290,44 @@ docker exec -it xrelay-postgres psql -U xrelay -d xrelay
 
 ```yaml
 ports:
-  - "3001:3000"  # 使用 3001 而不是 3000
+  - "127.0.0.1:3001:3000"  # 使用 3001 而不是 13000（保持仅本机访问）
 ```
 
 ## 📝 环境变量
 
-### 必需变量
+### 必需变量（`docker-compose.yml` 通过 `${VAR:?...}` 强制校验）
 
-- `DATABASE_URL`: PostgreSQL 连接字符串
+- `POSTGRES_PASSWORD`: PostgreSQL 密码（强随机串 >= 32 字符）
+- `REDIS_PASSWORD`: Redis 密码（强随机串 >= 32 字符）
+- `API_KEYS`: API Keys（逗号分隔，强随机串）
+- `CRON_SECRET`: 保护 `/api/cron/cleanup` 端点（强随机串 >= 32 字符）
+- `CORS_ORIGINS`: 允许的前端来源（逗号分隔）
+
+### 默认值变量（可在 `.env` 覆盖）
+
+- `POSTGRES_USER`: 默认 `xrelay`
+- `POSTGRES_DB`: 默认 `xrelay`
+- `ENABLE_API_KEY`: 默认 `true`（compose 中已设）
+- `NODE_ENV`: compose 中固定为 `production`
+- `HOST`: compose 中固定为 `0.0.0.0`（容器内必须，主机侧已绑定 `127.0.0.1`）
+- `PORT`: 默认 `3000`
 
 ### 可选变量
 
-- `ENABLE_API_KEY`: 是否启用 API Key 验证（默认: false）
-- `API_KEYS`: API Keys（逗号分隔）
-- `API_KEY_HEADER`: API Key 请求头名称（默认: x-api-key）
+- `API_KEY_HEADER`: API Key 请求头名称（默认: `x-api-key`）
+- `DATABASE_URL`: 未配置时使用内存模式（compose 中由 `POSTGRES_*` 自动拼接，通常无需手动设置）
+- `CHROME_PATH`: 网页捕获用的 Chrome 可执行文件路径（未配置时 Vercel 环境用 `@sparticuz/chromium`）
+- `ENABLE_CACHE` / `ENABLE_RATE_LIMIT` / `ENABLE_FALLBACK`: 功能开关，默认均为 `true`
+- `ENABLE_VERBOSE_LOGGING`: 默认 `false`（生产应保持关闭）
 
-### Redis 配置（可选）
+### Vercel KV / Redis 配置（可选）
 
-如果需要使用 Redis 进行缓存和限流（需先设置 `REDIS_PASSWORD` 环境变量）：
+`KV_REST_API_URL` / `KV_REST_API_TOKEN` 用于跨实例缓存。未配置时缓存走内存 LRU 降级。**限流始终为内存滑动窗口实现，不依赖 KV/Redis。**
 
-```yaml
-app:
-  environment:
-    KV_REST_API_URL: "redis://redis:6379"
-    KV_REST_API_TOKEN: "${REDIS_PASSWORD}"
+如需启用，在 `.env` 中设置：
+```bash
+KV_REST_API_URL=redis://redis:6379
+KV_REST_API_TOKEN=${REDIS_PASSWORD}
 ```
 
 ## 🚀 生产部署建议
@@ -330,15 +360,20 @@ services:
 
 3. **配置健康检查**
 
+`docker-compose.yml` 已内置健康检查，使用 `node` 内置 `http` 模块（避免依赖 `curl`/`wget`）：
+
 ```yaml
 services:
   app:
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
+      start_period: 15s
 ```
+
+端点 `/api/health` 由 `dispatchRequest` 路由处理，返回 200 + JSON（含 `version`/`uptime`/`requestId`）。
 
 4. **使用外部数据库**
 

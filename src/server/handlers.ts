@@ -29,7 +29,7 @@ import {
 import { logger } from "../logger.js";
 import type { ProxyRequest } from "../types/index.js";
 import { captureWebpage } from "../webpage-capture/index.js";
-import type { CaptureRequest } from "../webpage-capture/types.js";
+import type { CaptureRequest, CaptureOptions } from "../webpage-capture/types.js";
 
 /**
  * 请求上下文 - 跨运行时中立
@@ -76,6 +76,10 @@ if (isProduction()) {
 
 /**
  * 设置安全响应头
+ *
+ * 注意：CSP 使用 default-src 'none' 严格策略，因为本服务仅返回 JSON API，
+ * 不加载任何外部资源。frame-ancestors 'none' 防止点击劫持。
+ * Cache-Control: no-store 防止敏感响应（含代理数据）被中间层缓存。
  */
 export function setSecurityHeaders(headers: Record<string, string>): void {
   headers["X-Content-Type-Options"] = "nosniff";
@@ -85,6 +89,13 @@ export function setSecurityHeaders(headers: Record<string, string>): void {
   headers["X-XSS-Protection"] = "1; mode=block";
   headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
   headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()";
+  // 严格 CSP：JSON API 不需要加载任何外部资源
+  headers["Content-Security-Policy"] =
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+  // 防止响应被缓存（代理响应可能含敏感数据）
+  headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+  headers["Pragma"] = "no-cache";
+  headers["Expires"] = "0";
 }
 
 /**
@@ -123,7 +134,7 @@ function handleHealthCheck(
     body: {
       status: "healthy",
       timestamp: new Date().toISOString(),
-      version: "0.1.2",
+      version: "0.2.0",
       uptime: Math.floor(process.uptime?.() ?? 0),
       requestId: ctx.requestId,
     },
@@ -193,6 +204,8 @@ async function handleCapture(
       };
     }
 
+    let captureOptions: CaptureOptions | undefined = options;
+
     try {
       const parsedUrl = new URL(url);
       const dnsResult = await validateDnsResolution(parsedUrl.hostname);
@@ -208,6 +221,12 @@ async function handleCapture(
             400,
           ).toJSON(ctx.requestId),
         };
+      }
+
+      // SSRF TOCTOU 防护：将已验证的 IP 传入 capture 层，
+      // 避免 capture 时第二次 DNS 解析返回内网地址
+      if (dnsResult.ips && dnsResult.ips.length > 0) {
+        captureOptions = { ...options, resolvedIp: dnsResult.ips[0] };
       }
     } catch (dnsError) {
       // DNS 验证异常：fail-closed，防止攻击者通过触发 DNS 错误绕过 SSRF 防护
@@ -228,7 +247,7 @@ async function handleCapture(
       };
     }
 
-    const result = await captureWebpage(url, options);
+    const result = await captureWebpage(url, captureOptions);
 
     headers["X-Request-Id"] = ctx.requestId;
     headers["Content-Type"] = "application/json";
@@ -341,6 +360,9 @@ async function handleProxy(
       timeout: body?.timeout,
     };
 
+    // 由 validateDnsResolution 填充（SSRF TOCTOU 防护：pinned DNS）
+    let resolvedIp: string | undefined;
+
     const urlValidation = validateUrl(targetUrl);
     if (!urlValidation.valid) {
       headers["Content-Type"] = "application/json";
@@ -371,6 +393,10 @@ async function handleProxy(
           ).toJSON(ctx.requestId),
         };
       }
+
+      // SSRF TOCTOU 防护：将已验证的 IP 传入 request 对象，
+      // 直连 fallback 路径会通过 pinned DNS 固定到该 IP
+      resolvedIp = dnsResult.ips && dnsResult.ips.length > 0 ? dnsResult.ips[0] : undefined;
     } catch (dnsError) {
       // DNS 验证异常：fail-closed，防止攻击者通过触发 DNS 错误绕过 SSRF 防护
       logger.error(
@@ -396,6 +422,7 @@ async function handleProxy(
       headers: reqHeaders,
       body: reqBody,
       timeout,
+      resolvedIp,
     });
 
     headers["X-Request-Id"] = ctx.requestId;

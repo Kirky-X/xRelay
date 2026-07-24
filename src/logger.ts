@@ -21,7 +21,7 @@ export interface LogEntry {
 
 class Logger {
   private service = 'xRelay';
-  private version = '0.1.2';
+  private version = '0.2.0';
   private environment = process.env.NODE_ENV || 'production';
 
   private format(entry: LogEntry): string {

@@ -76,7 +76,7 @@ export class ProxyService {
     const normalizedRequest = this.normalizeRequest(request);
 
     // 生成缓存键（仅对 GET 请求缓存）
-    const cacheKey = this.generateCacheKey(normalizedRequest);
+    const cacheKey = await this.generateCacheKey(normalizedRequest);
 
     // 检查缓存（仅 GET 请求）
     if (mergedConfig.useCache && normalizedRequest.method === "GET") {
@@ -95,12 +95,14 @@ export class ProxyService {
 
     try {
       // 使用多代理竞速模式
+      // resolvedIp 透传：仅用于直连 fallback 路径的 SSRF TOCTOU 防护
       const response = await sendRequestWithMultipleProxies(
         {
           url: normalizedRequest.url,
           method: normalizedRequest.method as ProxyRequest["method"],
           headers: normalizedRequest.headers,
           body: normalizedRequest.body,
+          resolvedIp: request.resolvedIp,
         },
         mergedConfig.proxyCount,
         mergedConfig.useFallback
@@ -160,6 +162,7 @@ export class ProxyService {
           method: normalizedRequest.method as ProxyRequest["method"],
           headers: normalizedRequest.headers,
           body: normalizedRequest.body,
+          resolvedIp: request.resolvedIp,
         },
         {
           maxProxyAttempts: mergedConfig.maxProxyAttempts,
@@ -205,7 +208,7 @@ export class ProxyService {
   /**
    * 生成缓存键
    */
-  private generateCacheKey(request: { url: string; method: string; body?: string }): string {
+  private async generateCacheKey(request: { url: string; method: string; body?: string }): Promise<string> {
     const key = `${request.method}:${request.url}:${request.body || ""}`;
     return simpleHash(key);
   }

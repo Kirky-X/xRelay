@@ -23,10 +23,18 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # 检查 Docker Compose 是否安装
-if ! command -v docker-compose &> /dev/null; then
+# 优先使用新版 `docker compose`（plugin），回退到旧版 `docker-compose`（standalone）
+if docker compose version &> /dev/null; then
+    COMPOSE_CMD=(docker compose)
+elif command -v docker-compose &> /dev/null; then
+    COMPOSE_CMD=(docker-compose)
+else
     echo -e "${RED}❌ Docker Compose 未安装，请先安装 Docker Compose${NC}"
     exit 1
 fi
+
+# 项目根目录（compose 中 build.context: .. 指向这里，.env 也在这里）
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # 显示菜单
 show_menu() {
@@ -48,32 +56,32 @@ show_menu() {
 # 启动生产环境
 start_production() {
     echo -e "${GREEN}🏗️  启动生产环境...${NC}"
-    docker-compose -f docker-compose.yml up -d
+    "${COMPOSE_CMD[@]}" -f docker-compose.yml --env-file "$PROJECT_ROOT/.env" up -d
     echo -e "${GREEN}✅ 生产环境已启动${NC}"
     echo ""
-    echo "服务地址："
-    echo "  - 应用: http://localhost:3000"
-    echo "  - PostgreSQL: localhost:5432"
-    echo "  - Redis: localhost:6379"
+    echo "服务地址（主机端口 → 容器端口）："
+    echo "  - 应用: http://localhost:13000 → :3000"
+    echo "  - PostgreSQL: localhost:15432 → :5432"
+    echo "  - Redis: localhost:16379 → :6379"
 }
 
 # 启动开发环境
 start_development() {
     echo -e "${YELLOW}🔧 启动开发环境...${NC}"
-    docker-compose -f docker-compose.dev.yml up -d
+    "${COMPOSE_CMD[@]}" -f docker-compose.dev.yml --env-file "$PROJECT_ROOT/.env" up -d
     echo -e "${YELLOW}✅ 开发环境已启动${NC}"
     echo ""
-    echo "服务地址："
-    echo "  - 应用: http://localhost:3000"
-    echo "  - PostgreSQL: localhost:5432"
-    echo "  - Redis: localhost:6379"
+    echo "服务地址（主机端口 → 容器端口）："
+    echo "  - 应用: http://localhost:13000 → :3000"
+    echo "  - PostgreSQL: localhost:15432 → :5432"
+    echo "  - Redis: localhost:16379 → :6379"
 }
 
 # 停止所有服务
 stop_services() {
     echo -e "${RED}⏹️  停止所有服务...${NC}"
-    docker-compose -f docker-compose.yml down
-    docker-compose -f docker-compose.dev.yml down
+    "${COMPOSE_CMD[@]}" -f docker-compose.yml down
+    "${COMPOSE_CMD[@]}" -f docker-compose.dev.yml down
     echo -e "${GREEN}✅ 所有服务已停止${NC}"
 }
 
@@ -88,16 +96,16 @@ view_logs() {
 
     case $log_choice in
         1)
-            docker-compose -f docker-compose.yml logs -f app
+            "${COMPOSE_CMD[@]}" -f docker-compose.yml logs -f app
             ;;
         2)
-            docker-compose -f docker-compose.yml logs -f postgres
+            "${COMPOSE_CMD[@]}" -f docker-compose.yml logs -f postgres
             ;;
         3)
-            docker-compose -f docker-compose.yml logs -f redis
+            "${COMPOSE_CMD[@]}" -f docker-compose.yml logs -f redis
             ;;
         4)
-            docker-compose -f docker-compose.yml logs -f
+            "${COMPOSE_CMD[@]}" -f docker-compose.yml logs -f
             ;;
         *)
             echo "无效选项"
@@ -115,12 +123,12 @@ restart_services() {
     case $restart_choice in
         1)
             echo -e "${YELLOW}🔄 重启生产环境...${NC}"
-            docker-compose -f docker-compose.yml restart
+            "${COMPOSE_CMD[@]}" -f docker-compose.yml restart
             echo -e "${GREEN}✅ 生产环境已重启${NC}"
             ;;
         2)
             echo -e "${YELLOW}🔄 重启开发环境...${NC}"
-            docker-compose -f docker-compose.dev.yml restart
+            "${COMPOSE_CMD[@]}" -f docker-compose.dev.yml restart
             echo -e "${GREEN}✅ 开发环境已重启${NC}"
             ;;
         *)
@@ -136,8 +144,8 @@ cleanup() {
 
     if [[ $confirm == "y" || $confirm == "Y" ]]; then
         echo -e "${RED}🗑️  清理所有容器和数据...${NC}"
-        docker-compose -f docker-compose.yml down -v
-        docker-compose -f docker-compose.dev.yml down -v
+        "${COMPOSE_CMD[@]}" -f docker-compose.yml down -v
+        "${COMPOSE_CMD[@]}" -f docker-compose.dev.yml down -v
         docker system prune -f
         echo -e "${GREEN}✅ 清理完成${NC}"
     else
@@ -155,26 +163,29 @@ enter_postgres() {
 test_api() {
     echo -e "${GREEN}🧪 测试 API...${NC}"
     echo ""
-    
+
     # 检查应用是否运行
     if ! docker ps | grep -q xrelay-app; then
         echo -e "${RED}❌ 应用未运行，请先启动服务${NC}"
         return
     fi
 
+    # 主机端口 13000 映射到容器内 3000
+    local api_url="http://localhost:13000/api"
+
     echo "测试 1: 检查应用状态"
-    echo "GET http://localhost:3000/api"
+    echo "GET $api_url"
     echo ""
-    
+
     # 等待应用启动
     sleep 2
-    
+
     # 测试代理请求
     echo ""
     echo "测试 2: 发送代理请求"
-    echo "POST http://localhost:3000/api"
+    echo "POST $api_url"
     echo ""
-    curl -X POST http://localhost:3000/api \
+    curl -X POST "$api_url" \
         -H "Content-Type: application/json" \
         -d '{
             "url": "https://httpbin.org/ip",
@@ -182,7 +193,7 @@ test_api() {
         }' \
         -w "\n\n状态码: %{http_code}\n" \
         -s | head -20
-    
+
     echo ""
     echo -e "${GREEN}✅ API 测试完成${NC}"
 }

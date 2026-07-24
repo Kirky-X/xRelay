@@ -17,6 +17,13 @@ import type { ResourceInfo, ResourceStats, CaptureOptions } from "./types.js";
 import { RESOURCE_CONFIG } from "./config.js";
 import { logger } from "../logger.js";
 import { validateUrl, validateDnsResolution } from "../security.js";
+import { request as undiciRequest, Agent } from "undici";
+import { createPinnedAgent } from "../utils/pinned-agent.js";
+import {
+  readUndiciBodyWithLimit,
+  readWebBodyWithLimit,
+  type UndiciBodyLike,
+} from "../utils/body-reader.js";
 
 /**
  * 资源处理器
@@ -196,13 +203,31 @@ export class ResourceProcessor {
 
       const results = await this.processBatch(images, processImage);
 
+      // 用单次扫描替换所有 src -> dataUri，避免 split().join() 的 O(n × html_length) 性能问题
+      // （性能 H-2：原实现每次 split 创建临时数组，n 张图片时复杂度 O(n²)）
       let processedHtml = html;
-      for (const result of results) {
-        if (result.success && result.dataUri && result.originalSrc) {
-          processedHtml = processedHtml
-            .split(result.originalSrc)
-            .join(result.dataUri);
+      const successfulResults = results.filter(
+        (r): r is { originalSrc: string; dataUri: string; success: true } =>
+          r.success && !!r.dataUri && !!r.originalSrc,
+      );
+      if (successfulResults.length > 0) {
+        // 构造交替正则：url1|url2|url3，一次匹配所有 src
+        // 按 originalSrc 长度降序避免短 URL 误匹配长 URL 子串
+        const sorted = successfulResults.slice().sort(
+          (a, b) => b.originalSrc.length - a.originalSrc.length,
+        );
+        const pattern = sorted
+          .map((r) => `(${this.escapeRegex(r.originalSrc)})`)
+          .join("|");
+        const regex = new RegExp(pattern, "g");
+        // 用 Map 做 O(1) 查找替换值
+        const replaceMap = new Map<string, string>();
+        for (const r of sorted) {
+          replaceMap.set(r.originalSrc, r.dataUri);
         }
+        processedHtml = processedHtml.replace(regex, (match) => {
+          return replaceMap.get(match) ?? match;
+        });
       }
 
       try {
@@ -415,11 +440,18 @@ export class ResourceProcessor {
     }
 
     let processedCss = css;
+    // 预编译正则并缓存，避免循环内重复 new RegExp（性能优化）
+    // 用 Map 缓存 [originalUrl -> 编译后的正则]
+    const regexCache = new Map<string, RegExp>();
     for (const [originalUrl, dataUri] of processedUrls) {
-      processedCss = processedCss.replace(
-        new RegExp(`url\\(['"]?${this.escapeRegex(originalUrl)}['"]?\\)`, "gi"),
-        `url(${dataUri})`,
-      );
+      let pattern = regexCache.get(originalUrl);
+      if (!pattern) {
+        pattern = new RegExp(`url\\(['"]?${this.escapeRegex(originalUrl)}['"]?\\)`, "gi");
+        regexCache.set(originalUrl, pattern);
+      }
+      processedCss = processedCss.replace(pattern, `url(${dataUri})`);
+      // 全局正则的 lastIndex 需重置（多次 replace 时避免从上次的位置开始）
+      pattern.lastIndex = 0;
     }
 
     return processedCss;
@@ -570,6 +602,8 @@ export class ResourceProcessor {
     }
 
     // SSRF 防护：DNS 解析验证（防止 DNS 重绑定攻击）
+    // 同时获取已验证的 IP，用于 pinned DNS fetch（防止 TOCTOU）
+    let resolvedIp = "";
     try {
       const parsedUrl = new URL(url);
       const dnsResult = await validateDnsResolution(parsedUrl.hostname);
@@ -580,6 +614,8 @@ export class ResourceProcessor {
         });
         return resource;
       }
+      // 保存已验证的 IP，用于 pinned DNS fetch
+      resolvedIp = dnsResult.ips && dnsResult.ips.length > 0 ? dnsResult.ips[0] : "";
     } catch (error) {
       resource.error = `DNS resolution failed: ${error instanceof Error ? error.message : "Unknown error"}`;
       return resource;
@@ -592,34 +628,78 @@ export class ResourceProcessor {
         RESOURCE_CONFIG.fetchTimeout,
       );
 
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": this.options.userAgent,
-          Accept: "*/*",
-        },
-      });
+      // SSRF TOCTOU 防护：使用 pinned DNS Agent 固定到已验证的 IP
+      // 避免第二次 DNS 解析返回内网地址（DNS 重绑定攻击）
+      let responseBuffer: ArrayBuffer;
+      let responseStatus: number;
+      let responseContentType: string;
+      let responseOk: boolean;
+      let pinnedAgent: Agent | null = null;
+      try {
+        if (resolvedIp) {
+          // 使用统一的 pinned DNS Agent 工厂创建
+          pinnedAgent = createPinnedAgent(resolvedIp);
+          const undiciResp = await undiciRequest(url, {
+            signal: controller.signal,
+            headers: {
+              "User-Agent": this.options.userAgent,
+              Accept: "*/*",
+            },
+            dispatcher: pinnedAgent,
+          });
+          // 使用流式读取限制响应体大小（修复安全 M-1：与 capture-service 保持一致）
+          const bodyText = await readUndiciBodyWithLimit(
+            undiciResp.body as unknown as UndiciBodyLike | null,
+            this.options.maxImageSize,
+          );
+          responseStatus = undiciResp.statusCode;
+          responseOk = undiciResp.statusCode >= 200 && undiciResp.statusCode < 300;
+          const undiciHeaders = undiciResp.headers as Record<string, string | string[] | undefined>;
+          const ctHeader = undiciHeaders["content-type"];
+          responseContentType = Array.isArray(ctHeader)
+            ? ctHeader[0] || "application/octet-stream"
+            : ctHeader || "application/octet-stream";
+          responseBuffer = Buffer.from(bodyText, "utf-8") as unknown as ArrayBuffer;
+        } else {
+          // 使用标准 fetch（已通过 URL/DNS 验证，无 SSRF TOCTOU 风险）
+          const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+              "User-Agent": this.options.userAgent,
+              Accept: "*/*",
+            },
+          });
+          // 使用统一的流式读取工具限制响应体大小（防 OOM）
+          // 与 pinned 路径保持一致（规则7：复用已有工具）
+          const bodyText = await readWebBodyWithLimit(
+            response.body,
+            this.options.maxImageSize,
+          );
+          responseStatus = response.status;
+          responseOk = response.ok;
+          responseContentType = response.headers.get("content-type") || "application/octet-stream";
+          responseBuffer = Buffer.from(bodyText, "utf-8") as unknown as ArrayBuffer;
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        if (pinnedAgent) {
+          try { await pinnedAgent.close(); } catch { /* 忽略关闭错误 */ }
+        }
+      }
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        resource.error = `HTTP ${response.status}`;
+      if (!responseOk) {
+        resource.error = `HTTP ${responseStatus}`;
         return resource;
       }
 
-      const contentType =
-        response.headers.get("content-type") || "application/octet-stream";
-      resource.mimeType = contentType.split(";")[0].trim();
-
-      const buffer = await response.arrayBuffer();
-      const size = buffer.byteLength;
-
+      const size = responseBuffer.byteLength;
       if (size > this.options.maxImageSize) {
         resource.error = `Resource too large: ${size} bytes`;
         return resource;
       }
 
-      resource.content = Buffer.from(buffer).toString("base64");
+      resource.mimeType = responseContentType.split(";")[0].trim();
+      resource.content = Buffer.from(responseBuffer).toString("base64");
       resource.success = true;
     } catch (error) {
       resource.error = error instanceof Error ? error.message : "Unknown error";

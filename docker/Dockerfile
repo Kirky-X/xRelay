@@ -36,7 +36,6 @@ RUN npm ci --only=production
 
 # 从 builder 阶段复制构建产物
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
 
 # 创建非 root 用户运行应用，降低容器逃逸影响范围
 RUN addgroup -S xrelay && adduser -S -G xrelay xrelay \
@@ -53,4 +52,4 @@ ENV NODE_ENV=production
 ENTRYPOINT ["/sbin/tini", "--"]
 
 # 启动应用
-CMD ["node", "server.js"]
+CMD ["node", "dist/src/standalone.js"]
