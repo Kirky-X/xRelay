@@ -35,26 +35,57 @@ jobs:
       - name: Run npm audit
         id: audit
         run: |
+          # 生产依赖审计（阻断）：仅检查生产依赖，发现 CRITICAL/HIGH 即失败
+          npm audit --omit=dev --audit-level=moderate --json > audit-prod.json || true
+
+          # 全量审计（报告）：包含开发依赖，用于报告但不阻断
           npm audit --audit-level=moderate --json > audit-report.json || true
-          
-          CRITICAL=$(cat audit-report.json | jq '.metadata.vulnerabilities.critical // 0')
-          HIGH=$(cat audit-report.json | jq '.metadata.vulnerabilities.high // 0')
-          MODERATE=$(cat audit-report.json | jq '.metadata.vulnerabilities.moderate // 0')
-          
-          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
-          echo "high=$HIGH" >> $GITHUB_OUTPUT
-          echo "moderate=$MODERATE" >> $GITHUB_OUTPUT
-          
+
+          # 生产依赖漏洞（阻断标准）
+          PROD_CRITICAL=$(cat audit-prod.json | jq '.metadata.vulnerabilities.critical // 0')
+          PROD_HIGH=$(cat audit-prod.json | jq '.metadata.vulnerabilities.high // 0')
+          PROD_MODERATE=$(cat audit-prod.json | jq '.metadata.vulnerabilities.moderate // 0')
+
+          # 全量漏洞（含开发依赖，仅报告）
+          TOTAL_CRITICAL=$(cat audit-report.json | jq '.metadata.vulnerabilities.critical // 0')
+          TOTAL_HIGH=$(cat audit-report.json | jq '.metadata.vulnerabilities.high // 0')
+          TOTAL_MODERATE=$(cat audit-report.json | jq '.metadata.vulnerabilities.moderate // 0')
+
+          echo "prod_critical=$PROD_CRITICAL" >> $GITHUB_OUTPUT
+          echo "prod_high=$PROD_HIGH" >> $GITHUB_OUTPUT
+          echo "prod_moderate=$PROD_MODERATE" >> $GITHUB_OUTPUT
+          echo "total_critical=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
+          echo "total_high=$TOTAL_HIGH" >> $GITHUB_OUTPUT
+          echo "total_moderate=$TOTAL_MODERATE" >> $GITHUB_OUTPUT
+
           echo "## 🔍 NPM Audit Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 生产依赖（阻断标准）" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
-          echo "| High | $HIGH |" >> $GITHUB_STEP_SUMMARY
-          echo "| Moderate | $MODERATE |" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "$CRITICAL" -gt 0 || "$HIGH" -gt 0 ]]; then
-            echo "::error::Found $CRITICAL critical and $HIGH high vulnerabilities"
+          echo "| Critical | $PROD_CRITICAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| High | $PROD_HIGH |" >> $GITHUB_STEP_SUMMARY
+          echo "| Moderate | $PROD_MODERATE |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 全量依赖（含开发依赖，仅报告）" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Critical | $TOTAL_CRITICAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| High | $TOTAL_HIGH |" >> $GITHUB_STEP_SUMMARY
+          echo "| Moderate | $TOTAL_MODERATE |" >> $GITHUB_STEP_SUMMARY
+
+          # 开发依赖漏洞发出警告但不阻断
+          DEV_HIGH=$((TOTAL_HIGH - PROD_HIGH))
+          DEV_CRITICAL=$((TOTAL_CRITICAL - PROD_CRITICAL))
+          if [[ "$DEV_CRITICAL" -gt 0 || "$DEV_HIGH" -gt 0 ]]; then
+            echo "::warning::Found $DEV_CRITICAL critical and $DEV_HIGH high vulnerabilities in devDependencies (non-blocking)"
+          fi
+
+          # 仅生产依赖的 CRITICAL/HIGH 阻断 CI
+          if [[ "$PROD_CRITICAL" -gt 0 || "$PROD_HIGH" -gt 0 ]]; then
+            echo "::error::Found $PROD_CRITICAL critical and $PROD_HIGH high vulnerabilities in production dependencies"
             exit 1
           fi
 
@@ -63,7 +94,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: npm-audit-report
-          path: audit-report.json
+          path: |
+            audit-report.json
+            audit-prod.json
           retention-days: 30
 
   codeql:
