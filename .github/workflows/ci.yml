@@ -128,7 +128,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Dependency Review
-        uses: actions/dependency-review-action@05fe4576374b728f0c523d6a13d64c25081e0803 # v4.9.0
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v4.9.0
         continue-on-error: true
         # 当仓库未启用 Dependency Graph 时，dependency-review-action 会失败。
         # 此处设置 continue-on-error 避免阻断 PR；如需严格审查，请在仓库设置中
