@@ -14,6 +14,7 @@
 import { parseHTML } from 'linkedom';
 import { Defuddle } from 'defuddle/node';
 import TurndownService from 'turndown';
+import { zho as chineseStopwords, eng as englishStopwords } from 'stopword';
 import { extractArticle } from './article-extractor.js';
 import { extractTitleFromHtml } from './html-utils.js';
 import { logger } from '../logger.js';
@@ -27,26 +28,22 @@ import type {
 } from './types.js';
 
 /**
- * 中文停用词集合
- * 单字停用词用于过滤 N-gram 首尾；双字及以上的停用词整体过滤
+ * 停用词集合
+ *
+ * 使用专业的 `stopword` 库（npm 3.1.5，145 dependents，0 dependencies），
+ * 覆盖 62 种语言，社区维护活跃。
+ *
+ * - `zho`：中文停用词（78 个，覆盖基本虚词、代词、时间词、语气词等）
+ * - `eng`：英文停用词（108 个，覆盖常见英文虚词）
+ *
+ * 转换为 Set 提升查询性能（O(1) 查找），大型文本处理时避免线性扫描。
+ *
+ * 用途：
+ * 1. N-gram 首尾字符过滤（如"的X"、"X的"都被过滤）
+ * 2. 整体停用词过滤（如"的"、"了"不作为标签）
+ * 3. 英文单词过滤（如"the"、"is"不作为标签）
  */
-const STOP_WORDS = new Set<string>([
-  // 单字常用虚词
-  '的', '了', '是', '在', '和', '与', '这', '那', '一', '个',
-  '我', '你', '他', '她', '它', '们', '就', '也', '都', '还',
-  '又', '再', '已', '才', '只', '刚', '正', '将', '曾', '被',
-  '把', '对', '向', '为', '以', '于', '用', '给', '跟', '同',
-  '比', '由', '从', '至', '到', '上', '下', '中', '里', '外',
-  '前', '后', '左', '右', '内', '不', '无', '有', '之', '其',
-  '此', '彼', '若', '如', '或', '且', '则', '故', '即', '便',
-  // 双字停用词
-  '我们', '你们', '他们', '她们', '它们', '这是', '那是', '一个',
-  '一些', '可以', '应该', '需要', '的话', '因为', '所以', '但是',
-  '而且', '以及', '并且', '或者', '如果', '虽然', '尽管', '已经',
-  '正在', '这个', '那个', '这些', '那些', '什么', '怎么', '为何',
-  '如何', '为了', '由于', '于是', '然而', '此外', '另外', '例如',
-  '比如', '总之', '其中', '其他', '其它', '某种', '某些',
-]);
+const STOP_WORDS = new Set<string>([...chineseStopwords, ...englishStopwords]);
 
 /**
  * 默认选项

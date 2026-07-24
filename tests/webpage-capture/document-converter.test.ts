@@ -249,6 +249,31 @@ describe('DocumentConverter - extractTags', () => {
     expect(tags).not.toContain('了');
     expect(tags).not.toContain('是');
   });
+
+  it('应过滤英文停用词（使用 stopword 库的 eng 词表）', () => {
+    // 验证专业停用词库的多语言支持：英文停用词也应被过滤
+    const content = 'the quick brown fox jumps over the lazy dog and the cat';
+    const tags = extractTags(content, 5);
+    // 英文停用词不应出现在标签中
+    expect(tags).not.toContain('the');
+    expect(tags).not.toContain('and');
+    expect(tags).not.toContain('over');
+    // 实义词应可被提取
+    expect(tags.some(t => t.includes('quick') || t.includes('brown') || t.includes('fox'))).toBe(true);
+  });
+
+  it('应支持中英文混合停用词过滤', () => {
+    // 验证中英文混合场景下，两种语言的停用词都被专业库覆盖
+    const content = '传统技艺 the 的 protection and 传承 is 重要';
+    const tags = extractTags(content, 5);
+    // 中英文停用词都不应出现
+    expect(tags).not.toContain('的');
+    expect(tags).not.toContain('the');
+    expect(tags).not.toContain('and');
+    expect(tags).not.toContain('is');
+    // 中文实义词应可被提取
+    expect(tags.some(t => t.includes('传统') || t.includes('技艺') || t.includes('传承'))).toBe(true);
+  });
 });
 
 describe('DocumentConverter - generateFrontmatter', () => {
