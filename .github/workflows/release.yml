@@ -13,7 +13,6 @@ permissions:
   contents: write # create-release and upload assets
 
 env:
-  NODE_ENV: production
   CI: true
 
 jobs:
