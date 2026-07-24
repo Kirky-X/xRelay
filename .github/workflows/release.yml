@@ -219,6 +219,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [validate, release]
     if: ${{ !contains(needs.validate.outputs.tag, '-') }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -229,17 +233,43 @@ jobs:
           node-version: '20.x'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci --prefer-offline --no-audit
-
-      - name: Deploy to Vercel (Production)
+      - name: Check Vercel credentials
+        id: check
         run: |
-          if [[ -n "${{ secrets.VERCEL_TOKEN }}" ]]; then
-            npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }} --yes
-            echo "✅ Deployed to Vercel Production"
+          if [[ -z "$VERCEL_TOKEN" || -z "$VERCEL_ORG_ID" || -z "$VERCEL_PROJECT_ID" ]]; then
+            echo "::warning::Vercel secrets (VERCEL_TOKEN/VERCEL_ORG_ID/VERCEL_PROJECT_ID) not fully set, skipping deployment"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::VERCEL_TOKEN not set, skipping deployment"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Install Vercel CLI
+        if: steps.check.outputs.skip == 'false'
+        run: npm install -g vercel@latest
+
+      - name: Pull Vercel project settings (production)
+        if: steps.check.outputs.skip == 'false'
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build project artifacts
+        if: steps.check.outputs.skip == 'false'
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy prebuilt artifacts to Vercel (Production)
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "Deployment URL: $DEPLOY_URL"
+          echo "deploy_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          echo "✅ Deployed ${{ needs.validate.outputs.tag }} to Vercel Production"
+
+      - name: Deployment summary
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          echo "## ▲ Vercel Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Tag**: ${{ needs.validate.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Environment**: Production" >> "$GITHUB_STEP_SUMMARY"
 
   notify:
     name: Notify Release

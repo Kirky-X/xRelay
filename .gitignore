@@ -51,3 +51,6 @@ coverage/
 
 # Security tool binaries (downloaded by tiangang skill, not part of project)
 bin/
+
+# Vercel deployment temp scripts (never commit)
+.vercel-tmp/
