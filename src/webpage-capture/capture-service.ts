@@ -29,6 +29,7 @@ import {
 } from '../utils/body-reader.js';
 import { SECURITY_CONFIG } from '../config.js';
 import { validateUrl } from '../security.js';
+import { isIP as netIsIP } from 'node:net';
 
 /**
  * 降级 fetch 响应体最大字节数
@@ -196,9 +197,18 @@ export class CaptureService {
     startTime: number,
   ): Promise<CaptureResult> {
     try {
-      // SSRF TOCTOU 防护：有 resolvedIp 时使用 pinned DNS Agent
-      if (options.resolvedIp) {
+      // SSRF TOCTOU 防护：仅当 resolvedIp 是有效 IP 地址时才使用 pinned DNS
+      const isValidIp = typeof netIsIP === 'function' && netIsIP(options.resolvedIp) !== 0;
+      if (options.resolvedIp && isValidIp) {
         return await this.captureWithFetchPinned(url, options, browserError, startTime);
+      }
+
+      // resolvedIp 无效或未提供时，走标准 fetch 路径（向后兼容）
+      if (options.resolvedIp && !isValidIp) {
+        logger.warn(`resolvedIp 值无效（${options.resolvedIp}），回退到标准 fetch 路径`, {
+          module: 'CaptureService',
+          url,
+        });
       }
 
       const response = await fetch(url, {
