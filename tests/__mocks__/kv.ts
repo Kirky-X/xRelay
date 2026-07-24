@@ -31,8 +31,12 @@ export function createMockKV() {
     }),
     scanIterator: vi.fn(function* (options?: { match?: string }) {
       for (const key of store.keys()) {
-        if (options?.match && !key.includes(options.match.replace("*", ""))) {
-          continue;
+        if (options?.match) {
+          // Escape regex special chars then convert glob * to .* pattern
+          const escaped = options.match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*');
+          if (!new RegExp(escaped, 'i').test(key)) {
+            continue;
+          }
         }
         yield key;
       }

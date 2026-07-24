@@ -106,6 +106,13 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // safeResolveStaticPath 已验证 filePath 位于 DIST_ROOT 内（防路径遍历）
+      // 类型收窄：确保 readFileSync 接收的是已验证的安全路径
+      if (typeof filePath !== 'string' || !filePath.startsWith(DIST_ROOT)) {
+        res.statusCode = 404;
+        res.end('Not Found');
+        return;
+      }
       const content = readFileSync(filePath);
       const ext = filePath.split('.').pop();
       const contentTypes = {

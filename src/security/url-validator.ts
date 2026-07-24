@@ -9,7 +9,7 @@
  */
 
 import { validateUrl as validateUrlSecurity } from "../security.js";
-import { AppError, createInvalidUrlError, createMissingUrlError } from "../errors/index.js";
+import { createInvalidUrlError, createMissingUrlError } from "../errors/index.js";
 
 /**
  * URL 验证结果

@@ -79,8 +79,8 @@ vi.mock("../../src/logger.js", () => ({
   },
 }));
 
-// 导入被测模块 - 在 mock 之后
-import { reportProxyFailed } from "../../src/proxy-manager.js";
+// vi.mock 调用已被 vitest 提升（hoist）到所有 import 之前执行
+// 各测试用例通过动态 import() 获取被测模块实例
 
 describe("Proxy Manager - 初始化", () => {
   beforeEach(() => {
@@ -301,8 +301,12 @@ describe("Proxy Manager - 成功报告", () => {
   });
 
   it("应该正确报告代理成功", async () => {
-    const { initProxyManager, reportProxySuccess, getCircuitBreakerStatus } =
-      await import("../../src/proxy-manager.js");
+    const {
+      initProxyManager,
+      reportProxyFailed,
+      reportProxySuccess,
+      getCircuitBreakerStatus,
+    } = await import("../../src/proxy-manager.js");
 
     await initProxyManager();
 

@@ -215,11 +215,24 @@ describe("Security Extras - validateDnsResolution 错误路径", () => {
   });
 
   it("DNS 解析返回空列表应返回 invalid", async () => {
-    // 域名无法解析 → resolveDns 返回 []
-    // 使用一个不存在的域名，DoH 查询可能返回空
-    const result = await validateDnsResolution("this-domain-definitely-does-not-exist.invalid");
-    // DoH 可能返回空或被网络阻断，两种情况都导致 valid=false
-    expect(result.valid).toBe(false);
+    // Mock DoH 返回空结果（无 Answer 字段），避免真实网络调用
+    const originalFetch = global.fetch;
+    const originalVercel = process.env.VERCEL;
+    global.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
+    ) as unknown as typeof globalThis.fetch;
+    // 跳过系统 DNS 回退，避免真实 DNS 查询导致超时
+    process.env.VERCEL = "1";
+
+    try {
+      const result = await validateDnsResolution(
+        "this-domain-definitely-does-not-exist.invalid",
+      );
+      expect(result.valid).toBe(false);
+    } finally {
+      global.fetch = originalFetch;
+      process.env.VERCEL = originalVercel;
+    }
   });
 
   it("IPv4 字符串应直接通过 DNS 验证（跳过 DoH）", async () => {
@@ -252,14 +265,18 @@ describe("Security Extras - validateDnsResolution 错误路径", () => {
 
 describe("Security Extras - resolveDns DoH 路径（覆盖 line 484, 489-501）", () => {
   const originalFetch = global.fetch;
+  const originalVercel = process.env.VERCEL;
 
   beforeEach(() => {
     clearDnsCache();
     vi.clearAllMocks();
+    // 跳过系统 DNS 回退，避免真实 DNS 查询导致超时
+    process.env.VERCEL = "1";
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
+    process.env.VERCEL = originalVercel;
     vi.restoreAllMocks();
   });
 
