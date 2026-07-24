@@ -97,7 +97,7 @@ export async function resolveLaunchOptions(): Promise<LaunchOptions> {
     return {
       headless: BROWSER_CONFIG.headless,
       args,
-      executablePath: puppeteerFull.executablePath(),
+      executablePath: await puppeteerFull.executablePath(),
     };
   } catch (error) {
     throw new Error(
