@@ -35,6 +35,7 @@ import {
   type UndiciBodyLike,
 } from "./utils/body-reader.js";
 import { logger } from "./logger.js";
+import { validateUrl } from "./security.js";
 
 /**
  * 检查字符串是否为有效的 IP 地址（IPv4 或 IPv6）
@@ -460,6 +461,19 @@ async function sendRequestDirect(request: ProxyRequest): Promise<RequestResult> 
   logger.debug(`使用直连模式`, { module: "RequestHandler" });
   // ProxyRequest.method 可选：未指定时按 GET 处理
   const method = (request.method ?? "GET").toUpperCase() as HttpMethod;
+
+  // SSRF 防护：直连前静态验证 URL（阻止内网/私有地址请求）
+  const urlValidation = validateUrl(request.url);
+  if (!urlValidation.valid) {
+    logger.warn(`URL validation failed: ${urlValidation.error}`, {
+      module: "RequestHandler",
+      url: request.url,
+    });
+    return {
+      success: false,
+      error: `URL validation failed: ${urlValidation.error}`,
+    };
+  }
 
   // SSRF TOCTOU 防护：有 resolvedIp 时走 pinned DNS 路径
   // 仅当 resolvedIp 是有效 IP 地址时才使用 pinned DNS，避免无效值导致连接失败

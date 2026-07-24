@@ -28,6 +28,7 @@ import {
   type UndiciBodyLike,
 } from '../utils/body-reader.js';
 import { SECURITY_CONFIG } from '../config.js';
+import { validateUrl } from '../security.js';
 
 /**
  * 降级 fetch 响应体最大字节数
@@ -56,6 +57,22 @@ export class CaptureService {
     const startTime = Date.now();
     const mergedOptions = mergeCaptureOptions(options);
     const mode: CaptureMode = mergedOptions.mode;
+
+    // SSRF 防护：URL 静态验证（在 URL 进入浏览器导航/fetch 之前）
+    const urlValidation = validateUrl(url);
+    if (!urlValidation.valid) {
+      logger.warn(`URL validation failed: ${urlValidation.error}`, {
+        module: 'CaptureService',
+        url,
+      });
+      return {
+        success: false,
+        error: `URL validation failed: ${urlValidation.error}`,
+        url,
+        mode,
+        duration: Date.now() - startTime,
+      };
+    }
 
     logger.info(`Starting capture: ${url}`, {
       module: 'CaptureService',
