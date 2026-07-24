@@ -48,9 +48,18 @@
                 <div class="code-dot red"></div>
                 <div class="code-dot yellow"></div>
                 <div class="code-dot green"></div>
-                <span class="code-title">advanced-request.sh</span>
+                <span class="code-title">advanced-proxy.sh</span>
               </div>
               <pre class="code-content" @click="copyCode(1)" title="点击复制代码"><code>{{ codeExample2 }}</code></pre>
+            </div>
+            <div class="code-card">
+              <div class="code-header">
+                <div class="code-dot red"></div>
+                <div class="code-dot yellow"></div>
+                <div class="code-dot green"></div>
+                <span class="code-title">capture.sh</span>
+              </div>
+              <pre class="code-content" @click="copyCode(2)" title="点击复制代码"><code>{{ codeExample3 }}</code></pre>
             </div>
           </div>
         </div>
@@ -84,8 +93,8 @@ import { ref, onMounted } from 'vue';
 import logoUrl from '../../docs/assets/xRelay.png?url';
 
 const typingText = ref('');
-const fullText = '安全、快速、免费的代理转发服务';
-const codeExample1 = `# 基本请求示例
+const fullText = '安全、快速、免费的代理转发与网页捕获服务';
+const codeExample1 = `# 基本代理请求
 curl -X POST https://x-relay.vercel.app/api \\
   -H "Content-Type: application/json" \\
   -H "x-api-key: YOUR_API_KEY" \\
@@ -94,7 +103,7 @@ curl -X POST https://x-relay.vercel.app/api \\
     "method": "GET"
   }'`;
 
-const codeExample2 = `# 带自定义头部的请求
+const codeExample2 = `# 高级代理请求（含超时控制）
 curl -X POST https://x-relay.vercel.app/api \\
   -H "Content-Type: application/json" \\
   -H "x-api-key: YOUR_API_KEY" \\
@@ -104,7 +113,20 @@ curl -X POST https://x-relay.vercel.app/api \\
     "headers": {
       "Authorization": "Bearer token123"
     },
-    "body": "{\\"key\\": \\"value\\"}"
+    "body": "{\\"key\\": \\"value\\"}",
+    "timeout": 15000
+  }'`;
+
+const codeExample3 = `# 网页捕获请求
+curl -X POST https://x-relay.vercel.app/api/capture \\
+  -H "Content-Type: application/json" \\
+  -H "x-api-key: YOUR_API_KEY" \\
+  -d '{
+    "url": "https://example.com/article",
+    "options": {
+      "mode": "html",
+      "extractArticle": true
+    }
   }'`;
 
 // 打字机效果
@@ -121,9 +143,9 @@ const typeText = () => {
 };
 
 // 复制代码
+const examples = [codeExample1, codeExample2, codeExample3];
 const copyCode = (index: number) => {
-  const code = index === 0 ? codeExample1 : codeExample2;
-  navigator.clipboard.writeText(code).then(() => {
+  navigator.clipboard.writeText(examples[index]).then(() => {
     alert('代码已复制到剪贴板！');
   });
 };

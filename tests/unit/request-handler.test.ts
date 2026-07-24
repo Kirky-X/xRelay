@@ -35,6 +35,17 @@ vi.mock('../../src/logger.js', () => ({
   },
 }));
 
+// Mock undici 模块（代理请求走 undici.request + ProxyAgent，需 mock 避免实际网络连接导致测试超时）
+vi.mock('undici', () => ({
+  request: vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED 192.168.1.1:8080')),
+  ProxyAgent: vi.fn(function MockProxyAgent() {
+    this.close = () => Promise.resolve();
+  }),
+  Agent: vi.fn(function MockAgent() {
+    this.close = () => Promise.resolve();
+  }),
+}));
+
 // Mock config 模块
 vi.mock('../../src/config.js', () => ({
   REQUEST_TIMEOUT_CONFIG: {
