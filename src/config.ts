@@ -132,7 +132,7 @@ export const SECURITY_CONFIG = {
  * 单一来源原则：health 端点、日志 context 等统一引用此常量，
  * 避免多处硬编码导致版本漂移（曾出现 health 返回 0.2.0 而 package.json 已 0.2.2）。
  */
-export const APP_VERSION = "0.2.2";
+export const APP_VERSION = "0.2.4";
 
 /**
  * 检查是否为生产环境
