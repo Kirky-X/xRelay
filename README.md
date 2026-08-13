@@ -60,7 +60,11 @@
 | KV_REST_API_URL | 否 | Vercel KV 地址（分布式存储） | - |
 | KV_REST_API_TOKEN | 否 | Vercel KV 访问令牌 | - |
 
-> **生产环境强制校验**：`CORS_ORIGINS` 与 `CRON_SECRET` 在生产环境必须显式配置，否则启动时记录配置错误日志。详见 `src/config.ts` 的 `validateProductionConfig`。
+> **生产环境强制校验**：以下 4 项在生产环境必须显式配置，否则启动时记录配置错误日志（详见 `src/config.ts` 的 `validateProductionConfig`）：
+> - `API_KEYS` — 必须设置 API Key 列表
+> - `ENABLE_API_KEY` — 必须设为 `true`
+> - `CRON_SECRET` — Cron 端点认证密钥
+> - `CORS_ORIGINS` — 允许的跨域来源
 
 ### 使用示例
 
@@ -266,7 +270,7 @@ console.log(result);
 {
   "status": "healthy",
   "timestamp": "2026-03-15T12:00:00Z",
-  "version": "0.2.0",
+  "version": "0.2.4",
   "uptime": 3600,
   "requestId": "abc123"
 }

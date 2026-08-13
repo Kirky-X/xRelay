@@ -60,7 +60,11 @@ A free proxy relay service deployed on Vercel, with free proxy pool + Fallback d
 | KV_REST_API_URL | No | Vercel KV address (distributed storage) | - |
 | KV_REST_API_TOKEN | No | Vercel KV access token | - |
 
-> **Production environment mandatory**: `CORS_ORIGINS` and `CRON_SECRET` must be explicitly configured in production, otherwise configuration error logs will be recorded on startup. See `validateProductionConfig` in `src/config.ts`.
+> **Production environment mandatory**: The following 4 items must be explicitly configured in production, otherwise configuration error logs will be recorded on startup (see `validateProductionConfig` in `src/config.ts`):
+> - `API_KEYS` — API Key list must be set
+> - `ENABLE_API_KEY` — Must be set to `true`
+> - `CRON_SECRET` — Cron endpoint authentication secret
+> - `CORS_ORIGINS` — Allowed CORS origins
 
 ### Usage Example
 
@@ -266,7 +270,7 @@ Check service health status.
 {
   "status": "healthy",
   "timestamp": "2026-03-15T12:00:00Z",
-  "version": "0.2.0",
+  "version": "0.2.4",
   "uptime": 3600,
   "requestId": "abc123"
 }

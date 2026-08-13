@@ -48,7 +48,7 @@ export function stripHtmlTags(html: string): string {
   let prev: string;
   do {
     prev = text;
-    text = text.replace(/<script\b[\s\S]*?<\/script\s*>/gi, ''); // lgtm[js/bad-tag-filter] lgtm[js/incomplete-multi-character-sanitization]
+    text = text.replace(/<script\b[\s\S]*?<\/script\s*>/gi, ''); // lgtm[js/bad-tag-filter, js/incomplete-multi-character-sanitization]
     text = text.replace(/<style\b[\s\S]*?<\/style\s*>/gi, ''); // lgtm[js/incomplete-multi-character-sanitization]
     text = text.replace(/<!--[\s\S]*?-->/g, ''); // lgtm[js/incomplete-multi-character-sanitization]
   } while (text !== prev);

@@ -588,7 +588,7 @@ export class ResourceProcessor {
     do {
       prev = html;
       // Remove <script>...</script> blocks — non-greedy [\s\S] for cross-line matching
-      html = html.replace(/<script\b[\s\S]*?<\/script\s*>/gi, ""); // lgtm[js/bad-tag-filter] lgtm[js/incomplete-multi-character-sanitization]
+      html = html.replace(/<script\b[\s\S]*?<\/script\s*>/gi, ""); // lgtm[js/bad-tag-filter, js/incomplete-multi-character-sanitization]
       // Remove self-closing <script .../> tags
       html = html.replace(/<script\b[^>]*\/>/gi, ""); // lgtm[js/incomplete-multi-character-sanitization]
 
