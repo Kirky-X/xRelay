@@ -7,6 +7,8 @@
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FKirky-X%2FxRelay)
 
+**[中文文档](./README.md)** | **[English](./README.en.md)**
+
 在 Vercel 部署的免费代理转发服务，支持免费代理池 + Fallback 直连。
 
 **[📚 查看架构设计文档](./docs/ARCHITECTURE.md)**
