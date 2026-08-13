@@ -333,7 +333,7 @@ export function extractTags(content: string, maxTags: number): string[] {
 
   // 标点替换为空格，保留中文、英文、数字
   const text = content.replace(
-    /[，。！？；：、""''（）【】《》—…·\.\,\!\?\;\:\"\'\(\)\[\]\<\>\/\\]/g,
+    /[，。！？；：、“”‘’（）【】《》—…·\.,!?;:\"'()\[\]<>\/\\]/g,
     ' '
   );
 
@@ -493,7 +493,7 @@ function escapeMarkdownText(text: string): string {
  * 防止 URL 中的括号破坏 Markdown 链接语法 `[text](url)`
  */
 function escapeMarkdownUrl(url: string): string {
-  return url.replace(/([()])/g, '\\$1');
+  return url.replace(/([\\()])/g, '\\$1');
 }
 
 /**

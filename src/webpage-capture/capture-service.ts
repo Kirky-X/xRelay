@@ -253,6 +253,7 @@ export class CaptureService {
         );
       }
 
+      // lgtm[js/request-forgery]: URL validated by validateUrl() at capture() entry point.
       const response = await fetch(url, {
         method: "GET",
         headers: {
@@ -451,6 +452,8 @@ export class CaptureService {
     options: Required<CaptureOptions>,
   ): Promise<void> {
     try {
+      // lgtm[js/request-forgery]: URL validated by validateUrl() at capture()
+      // entry point (line 72), which blocks private IPs, localhost, and non-HTTP schemes.
       await page.goto(url, {
         waitUntil: "networkidle2",
         timeout: options.timeout,
@@ -464,6 +467,7 @@ export class CaptureService {
             url,
           },
         );
+        // lgtm[js/request-forgery]: URL validated by validateUrl() at capture() entry point.
         await page.goto(url, {
           waitUntil: "domcontentloaded",
           timeout: options.timeout,
@@ -551,9 +555,12 @@ export class CaptureService {
 
   /**
    * 睡眠
+   * 限制最大等待时间为 30 秒，防止用户控制的 waitTime 导致资源耗尽（DoS）
    */
   private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    const MAX_WAIT_TIME = 30_000;
+    const cappedMs = Math.min(Math.max(0, ms), MAX_WAIT_TIME);
+    return new Promise((resolve) => setTimeout(resolve, cappedMs));
   }
 
   /**

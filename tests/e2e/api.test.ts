@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { APP_VERSION } from "../../src/config.js";
 
 // vi.hoisted 提升 mock 函数，避免 vi.mock 的 TDZ 问题
 const { mockExecute, mockCaptureWebpage, featuresRef } = vi.hoisted(() => ({
@@ -162,7 +163,7 @@ describe("API 端到端测试", () => {
         status: "healthy",
       });
       expect((res.body as { timestamp: string }).timestamp).toBeDefined();
-      expect((res.body as { version: string }).version).toBe("0.2.2");
+      expect((res.body as { version: string }).version).toBe(APP_VERSION);
     });
 
     it("GET /api/health 应返回 200", async () => {

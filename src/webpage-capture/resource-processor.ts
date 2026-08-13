@@ -580,21 +580,28 @@ export class ResourceProcessor {
    * this layer reduces obvious script vectors before downstream text extraction.
    */
   private removeScriptTags(html: string): string {
+    // Iterative loop prevents bypass via nested/malformed tags
+    // (e.g., <scr<script>ipt>). Browser HTML parser is the authoritative
+    // security boundary; this is a defense-in-depth pre-filter.
     // lgtm[js/bad-tag-filter]: regex is a defense-in-depth pre-filter; the browser's
     // HTML parser is the actual security boundary for script execution.
-    // Remove <script>...</script> blocks — non-greedy [\s\S] for cross-line matching
-    html = html.replace(/<script\b[\s\S]*?<\/script>/gi, "");
-    // Remove self-closing <script .../> tags
-    html = html.replace(/<script\b[^>]*\/>/gi, "");
-
-    // Remove inline event handlers — covers quoted (single/double/backtick) and
-    // unquoted attribute values (e.g., onclick=alert(1), onload='evil()')
     // lgtm[js/incomplete-multi-character-sanitization]: defense-in-depth layer;
     // browser CSP and sandbox prevent execution of any surviving handlers.
-    html = html.replace(
-      /\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'>]+)/gi,
-      "",
-    );
+    let prev: string;
+    do {
+      prev = html;
+      // Remove <script>...</script> blocks — non-greedy [\s\S] for cross-line matching
+      html = html.replace(/<script\b[\s\S]*?<\/script\s*>/gi, "");
+      // Remove self-closing <script .../> tags
+      html = html.replace(/<script\b[^>]*\/>/gi, "");
+
+      // Remove inline event handlers — covers quoted (single/double/backtick) and
+      // unquoted attribute values (e.g., onclick=alert(1), onload='evil()')
+      html = html.replace(
+        /\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'>]+)/gi,
+        "",
+      );
+    } while (html !== prev);
 
     // Neutralize dangerous URI schemes in href/src attributes.
     // Loop prevents bypass via overlapping patterns (e.g., "javajavascript:script:").
@@ -616,7 +623,14 @@ export class ResourceProcessor {
    * 移除 HTML 注释
    */
   private removeHtmlComments(html: string): string {
-    return html.replace(/<!--[\s\S]*?-->/g, "");
+    // Iterative loop prevents bypass via nested/malformed comments
+    // (e.g., <!--<!-- --> -->).
+    let prev: string;
+    do {
+      prev = html;
+      html = html.replace(/<!--[\s\S]*?-->/g, "");
+    } while (html !== prev);
+    return html;
   }
 
   /**

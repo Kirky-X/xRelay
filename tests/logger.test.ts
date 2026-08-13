@@ -14,6 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { logger } from "../src/logger.js";
+import { APP_VERSION } from "../src/config.js";
 
 describe("Logger", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -73,7 +74,7 @@ describe("Logger", () => {
       expect(entry.level).toBe("info");
       expect(entry.message).toBe("hello");
       expect(entry.context.service).toBe("xRelay");
-      expect(entry.context.version).toBe("0.2.2");
+      expect(entry.context.version).toBe(APP_VERSION);
       // setup.ts 设置 NODE_ENV=test，logger 构造时读取
       expect(entry.context.environment).toBeDefined();
       expect(entry.context.foo).toBe("bar");
@@ -205,7 +206,7 @@ describe("Logger", () => {
       // 自定义字段被合并
       expect(entry.context.custom).toBe("value");
       // 内置字段存在
-      expect(entry.context.version).toBe("0.2.2");
+      expect(entry.context.version).toBe(APP_VERSION);
       expect(entry.context.environment).toBeDefined();
       // 自定义 context 在 ...context 展开顺序，可覆盖内置字段
       expect(entry.context.service).toBe("override-attempt");
