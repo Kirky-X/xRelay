@@ -253,7 +253,7 @@ export class CaptureService {
         );
       }
 
-      // lgtm[js/request-forgery]: URL validated by validateUrl() at capture() entry point.
+      // lgtm[js/request-forgery] URL validated by validateUrl() at capture() entry point.
       const response = await fetch(url, {
         method: "GET",
         headers: {
@@ -452,8 +452,7 @@ export class CaptureService {
     options: Required<CaptureOptions>,
   ): Promise<void> {
     try {
-      // lgtm[js/request-forgery]: URL validated by validateUrl() at capture()
-      // entry point (line 72), which blocks private IPs, localhost, and non-HTTP schemes.
+      // lgtm[js/request-forgery] URL validated by validateUrl() at capture() entry point.
       await page.goto(url, {
         waitUntil: "networkidle2",
         timeout: options.timeout,
@@ -467,7 +466,7 @@ export class CaptureService {
             url,
           },
         );
-        // lgtm[js/request-forgery]: URL validated by validateUrl() at capture() entry point.
+        // lgtm[js/request-forgery] URL validated by validateUrl() at capture() entry point.
         await page.goto(url, {
           waitUntil: "domcontentloaded",
           timeout: options.timeout,
@@ -560,7 +559,8 @@ export class CaptureService {
   private sleep(ms: number): Promise<void> {
     const MAX_WAIT_TIME = 30_000;
     const cappedMs = Math.min(Math.max(0, ms), MAX_WAIT_TIME);
-    return new Promise((resolve) => setTimeout(resolve, cappedMs));
+    // lgtm[js/resource-exhaustion] ms is capped to MAX_WAIT_TIME (30s) above.
+    return new Promise((resolve) => setTimeout(resolve, cappedMs)); // lgtm[js/resource-exhaustion]
   }
 
   /**

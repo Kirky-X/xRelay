@@ -545,8 +545,7 @@ async function sendRequestDirect(
       fetchOptions.body = request.body;
     }
 
-    // lgtm[js/request-forgery]: URL validated by validateUrl() above (line 490),
-    // which blocks private IPs, localhost, and non-HTTP schemes.
+    // lgtm[js/request-forgery] URL validated by validateUrl() above, blocks private IPs, localhost, and non-HTTP schemes.
     const response = await fetch(request.url, fetchOptions);
     clearTimeout(timeoutId);
 

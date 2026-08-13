@@ -582,22 +582,19 @@ export class ResourceProcessor {
   private removeScriptTags(html: string): string {
     // Iterative loop prevents bypass via nested/malformed tags
     // (e.g., <scr<script>ipt>). Browser HTML parser is the authoritative
-    // security boundary; this is a defense-in-depth pre-filter.
-    // lgtm[js/bad-tag-filter]: regex is a defense-in-depth pre-filter; the browser's
-    // HTML parser is the actual security boundary for script execution.
-    // lgtm[js/incomplete-multi-character-sanitization]: defense-in-depth layer;
-    // browser CSP and sandbox prevent execution of any surviving handlers.
+    // Defense-in-depth pre-filter; browser HTML parser is the actual security boundary.
+    // Browser CSP and sandbox prevent execution of any surviving handlers.
     let prev: string;
     do {
       prev = html;
       // Remove <script>...</script> blocks — non-greedy [\s\S] for cross-line matching
-      html = html.replace(/<script\b[\s\S]*?<\/script\s*>/gi, "");
+      html = html.replace(/<script\b[\s\S]*?<\/script\s*>/gi, ""); // lgtm[js/bad-tag-filter] lgtm[js/incomplete-multi-character-sanitization]
       // Remove self-closing <script .../> tags
-      html = html.replace(/<script\b[^>]*\/>/gi, "");
+      html = html.replace(/<script\b[^>]*\/>/gi, ""); // lgtm[js/incomplete-multi-character-sanitization]
 
       // Remove inline event handlers — covers quoted (single/double/backtick) and
       // unquoted attribute values (e.g., onclick=alert(1), onload='evil()')
-      html = html.replace(
+      html = html.replace( // lgtm[js/incomplete-multi-character-sanitization]
         /\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s"'>]+)/gi,
         "",
       );

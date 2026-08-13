@@ -44,20 +44,17 @@ export function stripHtmlTags(html: string): string {
   // Remove script and style blocks (non-greedy, cross-line) before stripping tags
   // to prevent their contents from leaking into extracted text.
   // Iterative loop prevents bypass via nested/malformed tags (e.g., <scr<script>ipt>).
-  // lgtm[js/bad-tag-filter]: text extraction utility, not a security boundary;
-  // output is plain text displayed to the user, not rendered as HTML.
+  // Text extraction utility, not a security boundary; output is plain text.
   let prev: string;
   do {
     prev = text;
-    text = text.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '');
-    text = text.replace(/<style\b[\s\S]*?<\/style\s*>/gi, '');
-    text = text.replace(/<!--[\s\S]*?-->/g, '');
+    text = text.replace(/<script\b[\s\S]*?<\/script\s*>/gi, ''); // lgtm[js/bad-tag-filter] lgtm[js/incomplete-multi-character-sanitization]
+    text = text.replace(/<style\b[\s\S]*?<\/style\s*>/gi, ''); // lgtm[js/incomplete-multi-character-sanitization]
+    text = text.replace(/<!--[\s\S]*?-->/g, ''); // lgtm[js/incomplete-multi-character-sanitization]
   } while (text !== prev);
 
-  // Strip remaining HTML tags
-  // lgtm[js/incomplete-multi-character-sanitization]: text extraction utility;
-  // any residual markup is inert in plain-text output.
-  text = text.replace(/<[^>]+>/g, '');
+  // Strip remaining HTML tags — inert in plain-text output context.
+  text = text.replace(/<[^>]+>/g, ''); // lgtm[js/incomplete-multi-character-sanitization]
 
   // Decode HTML entities — &amp; must be decoded LAST to prevent double-decoding
   // (e.g., "&amp;lt;" should become "&lt;", not "<")
