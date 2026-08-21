@@ -43,7 +43,7 @@
         "esbuild": "^0.25.0",
         "path-to-regexp": "^6.3.0",
         "pg": "^8.23.0",
-        "puppeteer-core": "^25.4.0",
+        "puppeteer-core": "^25.8.0",
         "stopword": "^3.1.5",
         "turndown": "^7.2.4",
         "undici": "^6.21.0",
